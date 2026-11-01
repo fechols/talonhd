@@ -345,3 +345,7 @@ User: levels as offline-rendered 3D geometry lit like the sprites, a time of day
   estimate within one frame of it; **0 of 30,720 ring samples differ** from the encoder's decode (the real
   6502 kernel). `check_phases.py` ok (7 phases), `test_hud_irq.py` ok.
 - Not yet on hardware (C64U paused by the user). Needs `c64u.py config` (now maps Ultimate Audio, sampler mix).
+- **C64U (user run from the USB stick, REU loaded before the PRG, 3ef57d0):** works; the user: "The stereo
+  effect is awesome." Read back at tick 3512: render 6.1 ms, music running, fault 0, **0 underruns** after
+  941,921 samples (~59 s), lead exactly 30,720 (ring - guard); calibration 785,201 CIA ticks per 12,288
+  samples = a 16,005 Hz sampler (16 kHz streams: 0.03 % sharp).
