@@ -67,8 +67,14 @@ impl Alloc {
     }
 }
 
-/// Build one level's REU image. Fails if it doesn't fit 16 MiB.
+/// Build one level's REU image without music. Fails if it doesn't fit 16 MiB.
 pub fn build_image(pano: &Panorama, frames: &[SpriteImage], border: u8) -> Result<Vec<u8>, String> {
+    build_level(pano, frames, border, &[], &[])
+}
+
+/// Build one level's REU image with its stage music (a DLT5 asset, `crate::audio`; empty = none) and
+/// the C64 build's paged code phases (`paging::NAMES` order, `dist/phases`; empty = none).
+pub fn build_level(pano: &Panorama, frames: &[SpriteImage], border: u8, music: &[u8], phases: &[Vec<u8>]) -> Result<Vec<u8>, String> {
     assert!(frames.len() <= u16::MAX as usize);
     assert!(pano.rows >= 25, "panorama needs at least 25 cell rows");
     let mut a = Alloc { image: vec![0; format::HEADER_LEN as usize] };
@@ -111,6 +117,34 @@ pub fn build_image(pano: &Panorama, frames: &[SpriteImage], border: u8) -> Resul
         }
     }
 
+    let music_addr = if music.is_empty() {
+        0
+    } else {
+        crate::audio::validate(music)?;
+        a.place(music)?
+    };
+
+    let phase_addr = if phases.is_empty() {
+        0
+    } else {
+        let n = crate::paging::PHASES as usize;
+        if phases.len() != n {
+            return Err(format!("{} phase images, want {n}", phases.len()));
+        }
+        let slot = crate::paging::PHASE_SLOT as usize;
+        let mut blob = vec![0u8; n * slot];
+        for (id, img) in phases.iter().enumerate() {
+            if img.len() > slot {
+                return Err(format!("phase {} is {} bytes (> {slot})", crate::paging::NAMES[id], img.len()));
+            }
+            blob[id * slot..id * slot + img.len()].copy_from_slice(img);
+            a.put_u16((header::PHASE_LENS + 2 * id) as u32, img.len() as u16);
+        }
+        let refs: Vec<&[u8]> = phases.iter().map(|v| v.as_slice()).collect();
+        a.put_u16(header::PHASE_STAMP as u32, crate::paging::stamp(&refs));
+        a.place(&blob)?
+    };
+
     let size = a.image.len() as u32;
     a.put_u32(header::SIZE as u32, size);
     a.put_u32(header::BACKGROUND as u32, bg_addr);
@@ -122,6 +156,8 @@ pub fn build_image(pano: &Panorama, frames: &[SpriteImage], border: u8) -> Resul
     a.image[header::SCREEN] = pano.palette.screen;
     a.put_u16(header::BG_ROWS as u32, pano.rows);
     a.put_u32(header::HUD as u32, hud_addr);
+    a.put_u32(header::MUSIC as u32, music_addr);
+    a.put_u32(header::PHASES as u32, phase_addr);
     let sum = checksum(&a.image);
     a.put_u32(header::CHECKSUM as u32, sum);
     Ok(a.image)

@@ -39,6 +39,9 @@ static mut LAST_MARK: u16 = 0;
 /// The game and this frame's sprites live in BSS (the soft stack under $D000 is small); the game is
 /// zero here and set up by `Game::reset` at boot (no 700-byte initial image in the program).
 static mut GAME: Game = unsafe { core::mem::zeroed() };
+/// In the free tail of `$0200-$07FF` after `.lowtext` (`.lowbss`, not loaded: `game::scene` fills it
+/// before every use).
+#[unsafe(link_section = ".lowbss")]
 static mut SPRITES: [Sprite; game::INSTANCES] = [Sprite { frame: 0, x: 0, y: 0, z: 0 }; game::INSTANCES];
 
 impl Hw for C64 {
@@ -102,39 +105,41 @@ fn in_vblank(c: &mut C64) -> bool {
 }
 
 unsafe extern "C" {
-    /// Load image and length of each paged phase (`link.ld`), in `paging` id order.
-    static __phase_boss_load_start: u8;
-    static __phase_boss_size: u8;
-    static __phase_attract_load_start: u8;
-    static __phase_attract_size: u8;
-    static __phase_midboss_load_start: u8;
-    static __phase_midboss_size: u8;
+    /// The BOOT phase's load image in the PRG (the other phases come in the level image).
     static __phase_boot_load_start: u8;
     static __phase_boot_size: u8;
+    /// Gate both sampler voices with IRQs masked (`asm/hud.S`).
+    fn audio_gate();
 }
 
 /// The phase in the window (0xFF: none).
 static mut CURRENT_PHASE: u8 = 0xFF;
+/// Each phase's length (BOOT's from the PRG, the rest from the level image's header).
+static mut PHASE_LEN: [u16; paging::PHASES as usize] = [0; paging::PHASES as usize];
+/// The stamp of the phases this PRG was built with: `scripts/build-target.sh` patches it in after the
+/// link (`tools/phases.py`); the level image's header must carry the same (`install_phases`).
+#[unsafe(no_mangle)]
+#[used]
+static PHASE_STAMP: u16 = 0xFFFF;
 
-/// Phase `p`'s load image address and length in the PRG.
-fn phase_image(p: u8) -> (u16, u16) {
-    unsafe {
-        match p {
-            paging::BOSS => (&raw const __phase_boss_load_start as u16, &raw const __phase_boss_size as u16),
-            paging::ATTRACT => (&raw const __phase_attract_load_start as u16, &raw const __phase_attract_size as u16),
-            paging::MIDBOSS => (&raw const __phase_midboss_load_start as u16, &raw const __phase_midboss_size as u16),
-            _ => (&raw const __phase_boot_load_start as u16, &raw const __phase_boot_size as u16),
-        }
-    }
-}
-
-/// Copy every phase image from the PRG's load image to its REU slot. Runs first in `main`: the images
-/// sit in frame-buffer and HUD space that boot overwrites soon after.
+/// Copy the level image's phases to the phase bank, through the bitmap at `$A000` (not shown yet).
+/// Runs from the BOOT phase, once the image is verified; a stamp from another build is fatal (border 8).
 #[inline(never)]
-fn stash_phases(c: &mut C64) {
+fn install_phases(c: &mut C64, img: &Image) {
+    // SAFETY: a plain read of a static the build patches; volatile so it is not folded to 0xFFFF.
+    let stamp = unsafe { core::ptr::read_volatile(&raw const PHASE_STAMP) };
+    if img.phases == 0 || img.phase_stamp != stamp {
+        fatal(c, 8);
+    }
     for p in 0..paging::PHASES {
-        let (at, len) = phase_image(p);
-        talonhd::hw::stash(c, at, paging::REU_PHASES + p as u32 * paging::PHASE_SLOT, len);
+        if p == paging::BOOT {
+            continue;
+        }
+        let n = img.phase_lens[p as usize];
+        let slot = p as u32 * paging::PHASE_SLOT;
+        talonhd::hw::fetch(c, img.phases + slot, 0xA000, n);
+        talonhd::hw::stash(c, 0xA000, paging::REU_PHASES + slot, n);
+        unsafe { PHASE_LEN[p as usize] = n };
     }
 }
 
@@ -151,7 +156,7 @@ pub extern "C" fn talonhd_page(p: u8) {
     }
     let port = c.peek(0x0001);
     c.poke(0x0001, 0x35);
-    let (_, len) = phase_image(p);
+    let len = unsafe { PHASE_LEN[p as usize] };
     talonhd::hw::fetch(c, paging::REU_PHASES + p as u32 * paging::PHASE_SLOT, paging::WINDOW, len);
     c.poke(0x0001, port);
 }
@@ -187,7 +192,12 @@ fn status_poke16(c: &mut C64, offset: u16, value: u16) {
 #[unsafe(no_mangle)]
 pub extern "C" fn main() -> i16 {
     let c = &mut C64;
-    stash_phases(c);
+    // The BOOT phase rides in the PRG, in frame-buffer space boot overwrites soon after: stash it first.
+    unsafe {
+        let len = &raw const __phase_boot_size as u16;
+        talonhd::hw::stash(c, &raw const __phase_boot_load_start as u16, paging::REU_PHASES + paging::BOOT as u32 * paging::PHASE_SLOT, len);
+        PHASE_LEN[paging::BOOT as usize] = len;
+    }
     // Boot-only code (image checks, HUD setup) runs from the paging window.
     paging::page(paging::BOOT);
     // 64 MHz with badlines off (C64U turbo registers); harmless elsewhere.
@@ -212,6 +222,7 @@ pub extern "C" fn main() -> i16 {
     if img.bg_rows < layout::ROWS {
         fatal(c, 7);
     }
+    install_phases(c, &img);
 
     // CIA 2 timer A: continuous, from $FFFF, for render timing.
     c.poke(0xDD04, 0xFF);
@@ -231,6 +242,12 @@ pub extern "C" fn main() -> i16 {
     #[allow(static_mut_refs)]
     let g = unsafe { &mut GAME };
     g.reset();
+    // The sampler's clock against CIA 2 (about 1.5 s of muted one-shots; no sampler, no music) and the
+    // stage music's header.
+    let player = talonhd::audio::player();
+    paging::page(paging::TUNE);
+    talonhd::audio::tune::calibrate(c, player);
+    talonhd::audio::tune::load(c, player, img.music);
     #[cfg(feature = "start-keel")]
     {
         g.world.scroll = (talonhd::midboss::ARRIVE as u32 - 20) << 8;
@@ -249,6 +266,15 @@ pub extern "C" fn main() -> i16 {
     unsafe { hud_irq_enable() };
     for i in 0..32 {
         c.poke(layout::STATUS + i, 0);
+    }
+    // The stage music: fill the ring, set both voices up, gate them together, start the clock.
+    paging::page(paging::AUDIO);
+    talonhd::audio::prime(c, player);
+    if player.state == talonhd::audio::RUNNING {
+        paging::page(paging::TUNE);
+        talonhd::audio::tune::arm(c);
+        unsafe { audio_gate() };
+        talonhd::audio::tune::started(c, player);
     }
 
     let mut human = false;
@@ -301,6 +327,9 @@ pub extern "C" fn main() -> i16 {
         render::present(c, buf, scroll);
         flipped_at = micros(c);
         render::hud_update(c, &game::hud_state(g));
+        // Keep the music ring ahead of the sampler (I/O is in; the AUDIO phase is paged every frame).
+        paging::page(paging::AUDIO);
+        talonhd::audio::service(c, player);
         // The boss's phase 2 recolors `hot` (a color RAM fill), in step with the frame just shown.
         let pal = game::palette(g, img.palette);
         if pal != shown_palette {

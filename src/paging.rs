@@ -26,7 +26,31 @@ pub const ATTRACT: u8 = 1;
 pub const MIDBOSS: u8 = 2;
 /// Boot-only code (`render::hud_init`, the REU image checks): paged once at startup.
 pub const BOOT: u8 = 3;
-pub const PHASES: u8 = 4;
+/// The ground and sea units' step (`ground::Ground::step`), paged while any is out or due.
+pub const GROUND: u8 = 4;
+/// The music player's producer (`audio::service`, `start`) and the DLT5 decode kernel, paged every frame.
+pub const AUDIO: u8 = 5;
+/// One-time music setup (`audio::tune`): sampler calibration, track header, voice setup.
+pub const TUNE: u8 = 6;
+pub const PHASES: u8 = 7;
+/// Phase names (`dist/phases/<name>.bin`, `.phase.<name>` in `link.ld`), in id order.
+pub const NAMES: [&str; PHASES as usize] = ["boss", "attract", "midboss", "boot", "ground", "audio", "tune"];
+
+/// The stamp tying a level image's phases to the PRG built with them: an additive checksum of every
+/// phase image but `BOOT`'s (`scripts/build-target.sh` patches it into the PRG; `bake` into the header).
+pub fn stamp(images: &[&[u8]]) -> u16 {
+    let mut s = 0x5A5Au16;
+    for (id, img) in images.iter().enumerate() {
+        if id as u8 == BOOT {
+            continue;
+        }
+        for &b in img.iter() {
+            s = s.rotate_left(1).wrapping_add(b as u16);
+        }
+        s = s.wrapping_add(img.len() as u16);
+    }
+    s
+}
 
 #[cfg(target_arch = "mos")]
 unsafe extern "C" {

@@ -315,3 +315,33 @@ User: levels as offline-rendered 3D geometry lit like the sprites, a time of day
   hangar roofs that matched the ground -> solid dark sunny side.
 - Panorama: void 70 %, dark 29 %, light 0.8 %, hot 0.5 %. Bake self-check passes.
 - C64U: held frame tick 3726 (over the docks, render 6.4 ms): **0 mismatched bytes**.
+
+## Ground and sea units (2026-11-01)
+
+- `src/ground.rs` (paged phase `GROUND`): SKIFF, PILLBOX, HATCH, CRAWLER from 35 placements on the 3D S1
+  geometry. Host: `cargo test --release` green (50 + 4 + 7), incl. `placements_sit_on_the_level`,
+  `the_ground_units_fight_and_fall` (most 7 out at once, 26 kills, 128 new bullets in a scripted sweep) and
+  `a_hatch_launches_wasps_unless_killed` (6 WASPs). Bake: +175 KB (skiff 24 KB, pillbox 57 KB with armed
+  frames, hatch 12 KB, crawler 76 KB, wrecks 4 KB); level image 5.89 MB (35.1 %).
+- C64 build: `.phase.ground` 4,039 / 4,096 B; to fit, `game::scene` went 4,190 -> 3,074 B (one store site,
+  `game::put`), the sprite list moved to `.lowbss` ($0200-$07FF tail), and `hits`/`shoot`/`launch`/`burst`
+  became resident. Main RAM: 2 bytes free. `tools/check_phases.py`: paging ok, 5 phases.
+- `tools/emu64.py --frames 1000`: 1000 flips (attract through the first SKIFF crossing), no fault.
+- Not yet on hardware (C64U use paused by the user).
+
+## Music: DLT5 16 kHz mono with Haas width (2026-11-01)
+
+- Encoding (`../sueme64` encoder, combined training, beam 128, a codebook per ~21 ms): `cue.stage_s1` 82.4 s ->
+  558,293 B (3,941 books, matched-level SNR 21.0 dB, 80 s to encode); `cue.midboss`, `cue.boss`,
+  `cue.stage_clear` encoded too (not yet played). Previews: `output/audio/<cue>.preview{,.delayed}.wav`.
+- Host: `decode_matches_the_encoder` (the player's decode = the encoder's decode, 0 of 30,720 ring samples
+  differ, and it runs on over the loop point), `the_ring_stays_ahead` (calibration within 200 ticks of a
+  model sampler; 3,000 frames incl. long ones: no underrun, the ring never overruns the lagging right voice).
+- C64 build: phases now live in the level REU image (PRG carries BOOT only; `install_phases`, stamp `15aa`).
+  AUDIO 3,847 B, TUNE 2,825 B, GROUND 4,039 B; main RAM ~340 B free (was 2: `stash_phases` and the phase
+  table left). Level image 6.48 MB (38.6 %) with music and phases.
+- emu64 (now models the sampler's timing and CIA timers A+B): 240 frames, no fault; calibration 768,736 ticks
+  per 12,288 samples (the model's 15,985 Hz); producer 30,462 samples ahead of the sampler, its clock
+  estimate within one frame of it; **0 of 30,720 ring samples differ** from the encoder's decode (the real
+  6502 kernel). `check_phases.py` ok (7 phases), `test_hud_irq.py` ok.
+- Not yet on hardware (C64U paused by the user). Needs `c64u.py config` (now maps Ultimate Audio, sampler mix).

@@ -69,6 +69,12 @@ pub struct Image {
     pub directory: u32,
     /// REU address of the HUD's static sprite blocks.
     pub hud: u32,
+    /// REU address of the stage music (DLT5), 0 = none.
+    pub music: u32,
+    /// REU address of the paged code phases, their lengths and stamp (`format::header::PHASES`).
+    pub phases: u32,
+    pub phase_lens: [u16; crate::paging::PHASES as usize],
+    pub phase_stamp: u16,
     /// Image size and the additive checksum of bytes `HEADER_LEN..size`.
     pub size: u32,
     pub checksum: u32,
@@ -95,7 +101,7 @@ fn poke16<H: Hw + ?Sized>(hw: &mut H, addr: u16, value: u16) {
 #[inline(never)]
 pub fn read_image<H: Hw + ?Sized>(hw: &mut H) -> Option<Image> {
     hw::init(hw);
-    let h: [u8; 48] = record(hw, 0);
+    let h: [u8; 64] = record(hw, 0);
     if h[..8] != format::MAGIC {
         return None;
     }
@@ -107,6 +113,16 @@ pub fn read_image<H: Hw + ?Sized>(hw: &mut H) -> Option<Image> {
         frames: le16(&h, header::FRAMES),
         directory: le24(&h, header::DIRECTORY),
         hud: le24(&h, header::HUD),
+        music: le24(&h, header::MUSIC),
+        phases: le24(&h, header::PHASES),
+        phase_lens: {
+            let mut l = [0u16; crate::paging::PHASES as usize];
+            for (i, v) in l.iter_mut().enumerate() {
+                *v = le16(&h, header::PHASE_LENS + 2 * i);
+            }
+            l
+        },
+        phase_stamp: le16(&h, header::PHASE_STAMP),
         size: le32(&h, header::SIZE),
         checksum: le32(&h, header::CHECKSUM),
     })

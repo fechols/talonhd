@@ -39,7 +39,7 @@ Host (run cargo from **PowerShell**: Git Bash's `link` shadows MSVC):
 ```sh
 cargo test --release                     # renderer vs reference compositor, raster3d goldens
 cargo check --no-default-features        # shared library still builds no_std
-cargo run --release -- bake              # dist/talonhd.reu + output/{sheets,frames}/*.png, self-checked
+cargo run --release -- bake              # dist/talonhd.reu (+ music, + dist/phases) and previews, self-checked
 cargo run --release -- preview --t 150   # attract-mode tick 150 through the model
 cargo run --release --example queen_assembly   # output/lineup/queen.png: GANTRY QUEEN body + parts at 3 banks
 cargo run --release --example frame_stats -- dist/talonhd.reu 512   # DMAs / blends / I/O writes per frame
@@ -59,7 +59,7 @@ cargo run --release -- bake-model assets/models/<id>.mesh --palette 6,12,1,3    
 C64 (rust-mos + llvm-mos in WSL `Ubuntu-24.04`, paths in `scripts/env.sh`):
 
 ```sh
-pwsh scripts/build-windows.ps1           # -> dist/talonhd.prg, dist/talonhd.elf
+pwsh scripts/build-windows.ps1           # -> dist/talonhd.prg, dist/talonhd.elf, dist/phases/*.bin (BEFORE bake)
 python tools/test_blit.py                # asm column kernel vs reference in a 6502 interpreter
 python tools/test_hud_irq.py             # HUD raster IRQ vs the table contract
 python tools/check_phases.py             # REU paging audit: no resident call into the window but phase entries
@@ -114,10 +114,15 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   then 30,000 points, a chain of bursts, she sinks away and the stage scrolls on. Bullets go through
   `World::spawn_ebullet`, scores through `add_score`. `the_fight_runs_to_the_end` plays it through.
 - **REU code paging** (`src/paging.rs`, as TALON's phases): rarely active code is a *phase* linked at the
-  window `$9000-$9FFF`; the PRG carries the images, `main` stashes them first thing to REU `$FF0000` +
-  4 KiB × id, `paging::page(id)` fetches one when it is not current (banking I/O in if the step had it
-  out). Phases: `BOSS` (the fight's step logic; `Boss::sprites/palette` and `placement` stay resident),
-  `ATTRACT` (the autopilot), `MIDBOSS` (the KEELBREAKER's step), `BOOT` (`hud_init`, image checks). A phase
+  window `$9000-$9FFF`, fetched by `paging::page(id)` from REU `$FF0000` + 4 KiB × id when it is not
+  current (banking I/O in if the step had it out). Only BOOT rides in the PRG; every other phase has its
+  load address outside it (`link.ld` `phimg`), `tools/phases.py` (run by the build) extracts them to
+  `dist/phases/` and stamps the PRG (`PHASE_STAMP`), `bake` embeds them in the level REU image (header
+  `PHASES`, lengths, stamp), and boot (`install_phases`) copies them to the phase bank; a stamp mismatch
+  is fatal (border 8). So: build the C64 program, then bake, then `run` + `upload-reu`. Phases: `BOSS` (the fight's step logic; `Boss::sprites/palette` and `placement` stay resident),
+  `ATTRACT` (the autopilot), `MIDBOSS` (the KEELBREAKER's step), `BOOT` (`hud_init`, image checks,
+  `install_phases`, `Game::reset`), `GROUND` (the ground units' step; paged while `Ground::busy`), `AUDIO`
+  (the music producer, every frame), `TUNE` (music setup, once). A phase
   may call resident code only. Link with `--no-check-sections` (phases overlap by design); build with
   `-Zmerge-functions=disabled -Zno-jump-tables` (`target-c64/.cargo/config.toml`): LLVM folded identical
   `aim` functions into one copy in the BOSS phase and resident code called it while another phase was in
@@ -129,6 +134,25 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   so a lower sun darkens flat ground. S2-S8 lights are drafts pending approval. Animated levels (user idea):
   N full panorama copies, frame `t mod N` picked by the background DMA (no extra per-frame cost; S1 is
   216 KB per copy).
+- **Ground units** (`src/ground.rs`, paged): SKIFF, PILLBOX, HATCH, CRAWLER as sprites in stage coordinates
+  (world x, `u` = stage line; screen y = 200 + lines - u), from `PLACEMENTS` (the bible waves placed on
+  `s1.rs` geometry; `placements_sit_on_the_level` checks quays, pits, roofs, water with `s1::surface`).
+  Up to `UNITS` (10) out at once incl. wrecks; z -3 under everything. Telegraphs are armed frames (hot
+  muzzles), never blinks. 16-heading sector aim (`yaw_to`, no multiplies). Resident: `sprites`, `busy`,
+  and the helpers `hits`/`shoot`/`launch` (`.text.resident.*` section names) and `burst` (`.hitext`), so
+  the phase fits its 4 KiB window (4,039 B). `the_ground_units_fight_and_fall`, `a_hatch_launches_wasps_unless_killed`.
+- **Music** (`src/audio.rs`; user: DLT5 from `../sueme64`, 16 kHz mono, Haas width): TALON's soundtrack
+  (`../talon/assets/music/cue.*.m4a`) encoded by sueme64's encoder to `assets/music/<cue>.dlt` (3-bit codes,
+  ~6.8 KB/s; THIRD-PARTY.md has the command); bake puts the stage cue in the level image (header `MUSIC`).
+  The AUDIO phase (sueme64's 6502 kernel `asm/digital.S` + a mono player) decodes ~267 samples a frame into
+  `STAGING` (`SEG_BUF`) and stashes them into ONE 8-bit ring at REU `$FE8000` (32 Ki samples); the C64U
+  sampler's left voice plays it, the right voice the same ring 160 samples (10 ms) later (Haas). The
+  producer paces itself by CIA 2 timer A against a boot calibration (TUNE: two muted one-shots, CIA timers
+  A+B chained); state at `$C800-$C9FF`. No 32-bit divides on the 6502 (LLVM turns `/` + `%` into a 2.4 KB
+  divmod): subtraction loops. Host: `decode_matches_the_encoder` (bit-exact vs the encoder's decode),
+  `the_ring_stays_ahead`; emu64 models the sampler and checks the ring. Hardware needs C64U config "Map
+  Ultimate Audio $DF20-DFFF = Enabled"; no sampler = silent (fault `NO_SAMPLER`). Next: cue changes
+  (midboss, boss, stage clear are encoded), fades, sound effects.
 - **Midboss** (`src/midboss.rs`, paged): the KEELBREAKER leaves its berth at line 2400 and slides up the docks
   channel; the scroll eases to 0.125 px/tick while it fights and it creeps up the screen (a line every 8
   ticks) so its later turrets come into reach. Turrets 12 HP each (BROADSIDE, WAKE MINES), then the bridge
@@ -160,12 +184,14 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   the game step runs with `$01 = $34`, so only pure code may live there, and `asm/hud.S` banks I/O in for
   itself. `$9000-$9FFF` is the paging window. Placement is by mangled
   name in the link script (or `#[cfg_attr(target_arch = "mos", unsafe(link_section = ".hitext"))]`). Every
-  region is nearly full: check `llvm-size -A dist/talonhd.elf` after changes. `World::digest` stays host-only
+  region is nearly full: check `llvm-size -A dist/talonhd.elf` after changes. The sprite list lives in
+  `.lowbss` (NOLOAD, the tail of `$0200-$07FF`); main RAM had 2 bytes free after the ground units. 6502
+  size: avoid i32/u32 in our code (the vendored sim's Q8 i32 positions are its own), struct-literal resets
+  of big structs, and repeated store sites (`game::put` is the scene's one sprite store). `World::digest` stays host-only
   (2 KB of 6502). Keep the `/DISCARD/ .init.250` rule: it calls KERNAL CHROUT at `$FFD2`, which is our code now.
 - **Boot:** the PRG erases the REU magic, then waits for magic + whole-image checksum, so `run` then `upload-reu`
   always starts on the complete new image.
-- **Next:** runners for SKIFF, PILLBOX, HATCH, CRAWLER (each a paged phase), the promotion sequence and the
-  per-level REU load (it must not overwrite the phase bank `$FF0000`). Then animated level frames (rolling
+- **Next:** the promotion sequence and the per-level REU load (it must not overwrite the phase bank `$FF0000`). Then animated level frames (rolling
   swells, searchlights, pulsing crystal). Memory ideas from the
   sibling repos still open: `opt-level "z"`, zero page `$90-$FF`, boot-only code in a retired section,
   borrow-and-restore overlays (impact), an IRQ static-frame audit (sueme64).

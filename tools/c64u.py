@@ -35,6 +35,15 @@ CONFIG = {
     "C64 and Cartridge Settings": {
         "RAM Expansion Unit": "Enabled",
         "REU Size": "16 MB",
+        # The sampler the music plays on (src/audio.rs).
+        "Map Ultimate Audio $DF20-DFFF": "Enabled",
+    },
+    # As ../sueme64's validated mix: the sampler +6 dB, its voices panned apart.
+    "Audio Mixer": {
+        "Vol Sampler L": "+6 dB",
+        "Vol Sampler R": "+6 dB",
+        "Pan Sampler L": "Left 3",
+        "Pan Sampler R": "Right 3",
     },
 }
 

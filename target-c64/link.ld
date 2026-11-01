@@ -24,7 +24,7 @@ MEMORY {
     upram (rwx) : ORIGIN = 0x5C00, LENGTH = 0x0400
     ioram (rwx) : ORIGIN = 0xD000, LENGTH = 0x1000
     /* Their load images, back to back right after the program in the PRG, from $4C00 up to at most $CFFF
-     * (frame-buffer, HUD and window space, free until the first frame), followed by the paged phases' images, which main stashes
+     * (frame-buffer, HUD and window space, free until the first frame), followed by the BOOT phase's image, which main stashes
      * in the REU before anything overwrites them. The copies run in this order, and upram's destination
      * only overlaps .hitext's image, which is copied first. */
     hiload (r) : ORIGIN = 0x4C00, LENGTH = 0x8400
@@ -34,6 +34,13 @@ MEMORY {
     ph_attract (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
     ph_midboss (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
     ph_boot (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
+    ph_ground (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
+    ph_audio (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
+    ph_tune (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
+    /* Load addresses of every phase but BOOT: outside the PRG (OUTPUT_FORMAT writes ram and hiload
+     * only). scripts/build-target.sh extracts them to dist/phases/<name>.bin; bake puts them in the
+     * level REU image, and boot copies them to the phase bank (main.rs install_phases). */
+    phimg (r) : ORIGIN = 0x10000, LENGTH = 0x10000
 }
 
 /* Sections are matched by name before commodore.ld's catch-all .text, first match wins: the attributed
@@ -47,13 +54,20 @@ SECTIONS {
         *(.text._ZN7talonhd4boss4Boss7sprites* .text._ZN7talonhd4boss4Boss7palette* .text._ZN7talonhd4boss9placement*)
     } >hiram AT>hiload
     .phase.boot : {
+        *(.text._ZN11talonhd_c6414install_phases*)
+        *(.text._ZN7talonhd4game4Game5reset*)
         *(.text._ZN7talonhd6render8hud_init* .text._ZN7talonhd6render10read_image* .text._ZN7talonhd6render12verify_image* .text._ZN7talonhd6render16invalidate_image*)
     } >ph_boot AT>hiload
     .lowtext : {
         *(.text._ZN7talonhd6render*)
+        *(.text._ZN11talonhd_c6410read_input*)
         *(.text._ZN7talonhd7midboss7Midboss7sprites* .text._ZN7talonhd7midboss7Midboss6active*)
         *(.text._ZN7talonhd7midboss4roll* .text._ZN7talonhd7midboss4deck* .text._ZN7talonhd7midboss10turret_yaw*)
     } >lowram AT>hiload
+    /* The sprite list (main.rs SPRITES): RAM after .lowtext, never loaded or cleared. */
+    .lowbss (NOLOAD) : {
+        *(.lowbss .lowbss.*)
+    } >lowram
     .uptext : {
         *(.text._ZN7talonhd3sim6common*)
         *(.text._ZN7talonhd3sim5world*)
@@ -66,21 +80,28 @@ SECTIONS {
     .phase.boss : {
         *(.text._ZN7talonhd4boss*)
         *(.rodata._ZN7talonhd4boss*)
-    } >ph_boss AT>hiload
+    } >ph_boss AT>phimg
     .phase.attract : {
         *(.text._ZN7talonhd3sim6replay*)
-    } >ph_attract AT>hiload
+    } >ph_attract AT>phimg
     .phase.midboss : {
         *(.text._ZN7talonhd7midboss*)
         *(.rodata._ZN7talonhd7midboss*)
-    } >ph_midboss AT>hiload
+    } >ph_midboss AT>phimg
+    .phase.tune : {
+        *(.text._ZN7talonhd5audio4tune*)
+        *(.rodata._ZN7talonhd5audio4tune*)
+    } >ph_tune AT>phimg
+    .phase.audio : {
+        *(.phase.audio.kernel)
+        *(.text._ZN7talonhd5audio*)
+        *(.rodata._ZN7talonhd5audio*)
+    } >ph_audio AT>phimg
+    .phase.ground : {
+        *(.text._ZN7talonhd6ground*)
+        *(.rodata._ZN7talonhd6ground*)
+    } >ph_ground AT>phimg
 }
-__phase_boss_load_start = LOADADDR(.phase.boss);
-__phase_boss_size = SIZEOF(.phase.boss);
-__phase_attract_load_start = LOADADDR(.phase.attract);
-__phase_attract_size = SIZEOF(.phase.attract);
-__phase_midboss_load_start = LOADADDR(.phase.midboss);
-__phase_midboss_size = SIZEOF(.phase.midboss);
 __phase_boot_load_start = LOADADDR(.phase.boot);
 __phase_boot_size = SIZEOF(.phase.boot);
 __hitext_start = ADDR(.hitext);

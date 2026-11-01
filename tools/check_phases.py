@@ -19,7 +19,9 @@ from test_blit import wsl_path  # noqa: E402
 
 WINDOW = (0x9000, 0xA000)
 # Phase entry points (mangled-name fragments), each called only after paging its phase in.
-ENTRIES = ('7Midboss4step', '4boss4Boss4step', '6replay9autopilot', '6render8hud_init', '6render10read_image',
+ENTRIES = ('7Midboss4step', '6Ground4step', '5audio7service', '5audio5prime', '5audio4tune3arm',
+           '5audio4tune7started', '5audio4tune9calibrate', '5audio4tune4load', '4game4Game5reset',
+           '14install_phases', '4boss4Boss4step', '6replay9autopilot', '6render8hud_init', '6render10read_image',
            '6render12verify_image', '6render16invalidate_image')
 
 

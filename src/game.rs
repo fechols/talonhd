@@ -7,6 +7,7 @@
 //! replays the C64's attract mode to any tick and renders the identical frame.
 
 use crate::boss::Boss;
+use crate::ground::{self, Ground};
 use crate::midboss::Midboss;
 use crate::demo::{self, *};
 use crate::render::Palette;
@@ -23,7 +24,7 @@ pub const OX: i16 = 4;
 pub const OY: i16 = 8;
 
 /// Every sprite a frame can hold: the boss, the pools of the sim and the TALON.
-pub const INSTANCES: usize = KEEL_SPRITES + QUEEN_SPRITES + GANNETS + WASPS + SPARKS + BURSTS + EBULLETS + PAIRS + 1;
+pub const INSTANCES: usize = ground::UNITS + KEEL_SPRITES + QUEEN_SPRITES + GANNETS + WASPS + SPARKS + BURSTS + EBULLETS + PAIRS + 1;
 /// The KEELBREAKER's hull, three turrets and two mines.
 const KEEL_SPRITES: usize = 6;
 
@@ -58,11 +59,13 @@ pub struct Game {
     pub boss: Boss,
     /// The KEELBREAKER fight (`crate::midboss`).
     pub midboss: Midboss,
+    /// SKIFFs, PILLBOXes, HATCHes and CRAWLERs (`crate::ground`).
+    pub ground: Ground,
 }
 
 impl Game {
     pub const fn new() -> Game {
-        Game { world: World::new(), pilot: Pilot { bank: 0, deaths: 0, since_hit: 255 }, ticks: 0, boss: Boss { state: 0, hp: [0; 4], core: 0, broken: 0, turn: 0, pat: 0, step: 0, timer: 0, sink: 0 }, midboss: Midboss { state: 0, y: 0, hp: [0; 3], core: 0, clock: 0, turn: 0, pat: 0, step: 0, timer: 0, mines: [crate::midboss::Mine { t: 0, x: 0, y: 0, vx: 0, vy: 0 }; 2], yaw: [0; 3] } }
+        Game { world: World::new(), pilot: Pilot { bank: 0, deaths: 0, since_hit: 255 }, ticks: 0, boss: Boss { state: 0, hp: [0; 4], core: 0, broken: 0, turn: 0, pat: 0, step: 0, timer: 0, sink: 0 }, midboss: Midboss { state: 0, y: 0, hp: [0; 3], core: 0, clock: 0, turn: 0, pat: 0, step: 0, timer: 0, mines: [crate::midboss::Mine { t: 0, x: 0, y: 0, vx: 0, vy: 0 }; 2], yaw: [0; 3] }, ground: Ground::new() }
     }
 
     /// Power-on state in place (the C64 keeps `Game` zeroed in BSS and calls this at boot).
@@ -74,6 +77,7 @@ impl Game {
         self.ticks = 0;
         self.boss = Boss::default();
         self.midboss = Midboss::default();
+        self.ground = Ground::new();
     }
 
     /// One tick with this tick's input.
@@ -100,6 +104,12 @@ impl Game {
         } else {
             crate::paging::page(crate::paging::BOSS);
             self.boss.step(&mut self.world);
+        }
+        // The ground units' step is a paged phase too, paged in only while one is out or due.
+        let at = lines(self);
+        if self.ground.busy(at) {
+            crate::paging::page(crate::paging::GROUND);
+            self.ground.step(&mut self.world, at);
         }
         let p = &mut self.pilot;
         let target = if self.world.state != PLAY {
@@ -206,6 +216,15 @@ fn place(frame: u16, x: i16, y: i16, w: u16, h: u16, z: i16) -> Sprite {
     Sprite { frame, x: ((x + OX) >> 1) - (w >> 1) as i16, y: y + OY - (h >> 1) as i16, z }
 }
 
+/// Append `place(..)` to the frame's sprites (one store site for the whole scene: 6502 code size).
+#[inline(never)]
+pub(crate) fn put(out: &mut [Sprite; INSTANCES], n: &mut usize, frame: u16, x: i16, y: i16, w: u16, h: u16, z: i16) {
+    if *n < INSTANCES {
+        out[*n] = place(frame, x, y, w, h, z);
+        *n += 1;
+    }
+}
+
 /// The stage palette with the fight's recolor (phase 2 turns `hot` yellow).
 pub fn palette(g: &Game, base: Palette) -> Palette {
     g.boss.palette(base)
@@ -217,7 +236,8 @@ pub fn scene(g: &Game, out: &mut [Sprite; INSTANCES]) -> usize {
     let w = &g.world;
     let mut n = 0;
     let (px, py) = ((w.player.x >> 8) as i16, (w.player.y >> 8) as i16);
-    n += g.midboss.sprites(w, &mut out[..KEEL_SPRITES]);
+    g.ground.sprites(out, &mut n);
+    n += g.midboss.sprites(w, &mut out[n..n + KEEL_SPRITES]);
     n += g.boss.sprites(w, &mut out[n..n + QUEEN_SPRITES]);
     for k in 0..GANNETS {
         let gn = &w.gannets[k];
@@ -229,8 +249,7 @@ pub fn scene(g: &Game, out: &mut [Sprite; INSTANCES]) -> usize {
                 G_CLIMB => GANNET_PITCHES + 1,
                 _ => 2,
             };
-            out[n] = place(GANNET_FRAME + pose, (gn.x >> 8) as i16, (gn.y >> 8) as i16, GANNET_W, GANNET_H, Z_GANNET);
-            n += 1;
+            put(out, &mut n, GANNET_FRAME + pose, (gn.x >> 8) as i16, (gn.y >> 8) as i16, GANNET_W, GANNET_H, Z_GANNET);
         }
     }
     for k in 0..WASPS {
@@ -239,51 +258,46 @@ pub fn scene(g: &Game, out: &mut [Sprite; INSTANCES]) -> usize {
             // Sim heading h (0 up, clockwise, 16 steps); the frames turn counter-clockwise from nose-down.
             let h = (wp.angle.wrapping_add(8) >> 4) as u16;
             let frame = DRONE_FRAME + (8u16.wrapping_sub(h) & 15);
-            out[n] = place(frame, (wp.x >> 8) as i16, (wp.y >> 8) as i16, DRONE_W, DRONE_H, Z_WASP);
-            n += 1;
+            put(out, &mut n, frame, (wp.x >> 8) as i16, (wp.y >> 8) as i16, DRONE_W, DRONE_H, Z_WASP);
         }
     }
     for k in 0..SPARKS {
         let s = &w.sparks[k];
         if s.alive {
             let frame = SPARK_FRAME + ((s.t >> 3) & 3) as u16;
-            out[n] = place(frame, s.x0 + sway(s.t), (s.y >> 8) as i16, SPARK_W, SPARK_H, Z_SPARK);
-            n += 1;
+            put(out, &mut n, frame, s.x0 + sway(s.t), (s.y >> 8) as i16, SPARK_W, SPARK_H, Z_SPARK);
         }
     }
     for k in 0..BURSTS {
         let b = &w.bursts[k];
         if b.t != 0 {
             let age = (crate::sim::actors::BURST_TICKS - b.t) as u16 / 4;
-            out[n] = place(BURST_FRAME + age.min(BURST_FRAMES - 1), b.x, b.y, BURST_W, BURST_H, Z_BURST);
-            n += 1;
+            put(out, &mut n, BURST_FRAME + age.min(BURST_FRAMES - 1), b.x, b.y, BURST_W, BURST_H, Z_BURST);
         }
     }
     for k in 0..PAIRS {
         let p = &w.pairs[k];
         if p.alive != 0 {
-            out[n] = place(PAIR_FRAME + p.alive as u16 - 1, p.x, p.y + PAIR_H as i16 / 2, PAIR_W, PAIR_H, Z_PAIR);
-            n += 1;
+            put(out, &mut n, PAIR_FRAME + p.alive as u16 - 1, p.x, p.y + PAIR_H as i16 / 2, PAIR_W, PAIR_H, Z_PAIR);
         }
     }
     let p = &w.player;
     if w.state == PLAY || w.state == LAUNCH {
         let bank = (g.pilot.bank + 4) as u16;
         // Invincible (respawn or arming): the energy-wave frames instead of a blink.
-        out[n] = if p.invuln_kind != INV_NONE {
+        let (frame, sw, sh) = if p.invuln_kind != INV_NONE {
             let step = (w.tick as u16 / 3) % SHIELD_STEPS;
-            place(SHIELD_FRAME + bank * SHIELD_STEPS + step, px, py, SHIELD_W, SHIELD_H, Z_PLAYER)
+            (SHIELD_FRAME + bank * SHIELD_STEPS + step, SHIELD_W, SHIELD_H)
         } else {
-            place(PLAYER_FRAME + bank, px, py, PLAYER_W, PLAYER_H, Z_PLAYER)
+            (PLAYER_FRAME + bank, PLAYER_W, PLAYER_H)
         };
-        n += 1;
+        put(out, &mut n, frame, px, py, sw, sh, Z_PLAYER);
     }
     for k in 0..EBULLETS {
         let b = &w.ebullets[k];
         if b.kind != 0 {
             let (frame, bw, bh) = if b.kind == B_BOMB { (BOMB_FRAME, BOMB_W, BOMB_H) } else { (ROUND_FRAME, ROUND_W, ROUND_H) };
-            out[n] = place(frame, b.x >> 6, b.y >> 6, bw, bh, Z_BULLET);
-            n += 1;
+            put(out, &mut n, frame, b.x >> 6, b.y >> 6, bw, bh, Z_BULLET);
         }
     }
     // The camera shake moves everything drawn with the panorama: whole columns here, the rest is XSCROLL.

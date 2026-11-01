@@ -19,6 +19,9 @@ use talonhd::model::{self, Machine};
 use talonhd::render::{self, Scroll};
 use talonhd::{demo, game, mesh, models, png, reference};
 
+/// S1 BREAKWATER's stage music: TALON's `cue.stage_s1`, encoded by `../sueme64`'s DLT5 encoder (THIRD-PARTY.md).
+const MUSIC_S1: &str = "assets/music/cue.stage_s1.dlt";
+
 struct Args(Vec<String>);
 
 impl Args {
@@ -112,6 +115,12 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         ("shield", demo::SHIELD_FRAME, demo::PLAYER_BANKS * demo::SHIELD_STEPS),
         ("keel", demo::KEEL_FRAME, demo::KEEL_ROLLS),
         ("turret", demo::TURRET_FRAME, demo::TURRET_YAWS),
+        ("skiff", demo::SKIFF_FRAME, demo::UNIT_YAWS),
+        ("pillbox", demo::PILLBOX_FRAME, 2 * demo::UNIT_YAWS),
+        ("hatch", demo::HATCH_FRAME, demo::HATCH_POSES),
+        ("crawler", demo::CRAWLER_FRAME, 2 * demo::UNIT_YAWS),
+        ("wreck", demo::WRECK_FRAME, 1),
+        ("hulk", demo::WRECK_FRAME + 1, 1),
     ];
     let mut total = pano.rows as usize * 320;
     println!("panorama: {} cell rows, {} bytes", pano.rows, total);
@@ -123,7 +132,28 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         let (w, px) = sheet(set, pal);
         png::save_wide(&previews.join(format!("sheets/{name}.png")), w, &px)?;
     }
-    let image = bake::build_image(&pano, &frames, 0)?;
+    // The stage music (DLT5, 16 kHz mono; `crate::audio`), when it has been encoded.
+    let music = std::fs::read(MUSIC_S1).unwrap_or_default();
+    if music.is_empty() {
+        println!("music: {MUSIC_S1} missing, the level image has none");
+    } else {
+        let (samples, books) = talonhd::audio::validate(&music)?;
+        println!("music: {MUSIC_S1}: {} bytes, {:.1} s, {books} codebooks", music.len(), samples as f64 / 16_000.0);
+    }
+    // The C64 build's paged code phases (`scripts/build-target.sh` writes them): the image carries them.
+    let phases: Vec<Vec<u8>> = talonhd::paging::NAMES
+        .iter()
+        .map(|n| std::fs::read(format!("dist/phases/{n}.bin")).unwrap_or_default())
+        .collect();
+    let phases = if phases.iter().all(|p| !p.is_empty()) {
+        let refs: Vec<&[u8]> = phases.iter().map(|v| v.as_slice()).collect();
+        println!("phases: {} B in {} slots, stamp {:04x}", phases.iter().map(|p| p.len()).sum::<usize>(), phases.len(), talonhd::paging::stamp(&refs));
+        phases
+    } else {
+        println!("phases: dist/phases incomplete (build the C64 program first); the image has none");
+        Vec::new()
+    };
+    let image = bake::build_level(&pano, &frames, 0, &music, &phases)?;
     println!("level image: {} bytes of 16 MiB ({:.1} %), art ~{total} bytes", image.len(), image.len() as f64 * 100.0 / 16777216.0);
     write(&out.join("talonhd.reu"), &image)?;
     write(&out.join("talonhd.cfg"), include_bytes!("../config/talonhd.cfg"))?;

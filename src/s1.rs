@@ -525,6 +525,41 @@ pub fn code_share(p: &Panorama) -> [f64; 4] {
     n.map(|k| k as f64 / p.codes.len() as f64)
 }
 
+/// The top surface under world point (`x`, `u`): the highest triangle's height there and its material
+/// (`None` over nothing). Placement checks for the ground units (`crate::ground`).
+pub fn surface(mesh: &Mesh, x: f64, u: f64) -> Option<(f64, u8)> {
+    let mut best: Option<(f64, u8)> = None;
+    for (t, &m) in mesh.tris.iter().zip(&mesh.mats) {
+        let (a, b, c) = (mesh.verts[t[0] as usize], mesh.verts[t[1] as usize], mesh.verts[t[2] as usize]);
+        if x < a[0].min(b[0]).min(c[0]) || x > a[0].max(b[0]).max(c[0]) || u < a[1].min(b[1]).min(c[1]) || u > a[1].max(b[1]).max(c[1]) {
+            continue;
+        }
+        let area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+        if area.abs() < 1e-9 {
+            continue;
+        }
+        let w0 = ((b[0] - x) * (c[1] - u) - (b[1] - u) * (c[0] - x)) / area;
+        let w1 = ((c[0] - x) * (a[1] - u) - (c[1] - u) * (a[0] - x)) / area;
+        let w2 = 1.0 - w0 - w1;
+        if w0 < -1e-9 || w1 < -1e-9 || w2 < -1e-9 {
+            continue;
+        }
+        let z = w0 * a[2] + w1 * b[2] + w2 * c[2];
+        if best.is_none_or(|(bz, _)| z > bz) {
+            best = Some((z, m));
+        }
+    }
+    best
+}
+
+/// Surface material names for placement checks.
+pub const SURFACE_WATER: u8 = WATER;
+pub const SURFACE_CONCRETE: u8 = CONCRETE;
+pub const SURFACE_FOAM: u8 = FOAM;
+pub const SURFACE_PAINT: u8 = PAINT;
+pub const SURFACE_CRYSTAL: u8 = CRYSTAL;
+pub const SURFACE_ROOF: u8 = ROOF;
+
 #[cfg(test)]
 mod tests {
     use super::*;

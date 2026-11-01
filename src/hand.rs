@@ -118,6 +118,11 @@ pub fn skiff() -> ModelFile {
 /// PILLBOX: a round concrete drum with a chamfered roof, a turret ring with twin barrels, and crystal
 /// grown through the back of the roof. 40 px across.
 pub fn pillbox() -> ModelFile {
+    pillbox_armed(false)
+}
+
+/// The PILLBOX about to fire: its barrel tips glow `hot` (a steady telegraph, never a blink).
+pub fn pillbox_armed(glow: bool) -> ModelFile {
     let mut m = Mesh::new(vec![hull(), hull_dark(), weapon(), crystal(), Material::glow(HOT)]);
     let rings = [(20.0, 0.0), (20.0, 5.0), (16.0, 9.0)];
     for w in rings.windows(2) {
@@ -133,6 +138,9 @@ pub fn pillbox() -> ModelFile {
     m.poly(&dome, 0);
     for x in [-3.0, 3.0] {
         m.tube([x, 2.0, 11.0], [x, 20.0, 11.0], 1.4, 5, 2, 4);
+        if glow {
+            m.tube([x, 15.0, 11.5], [x, 21.0, 11.5], 2.0, 5, 4, 4);
+        }
     }
     m.shard([-5.0, -9.0, 9.0], [-8.0, -14.0, 15.0], 3.0, 3);
     m.shard([2.0, -11.0, 9.0], [4.0, -16.0, 14.0], 2.5, 3);
@@ -171,6 +179,11 @@ pub fn hatch(k: usize) -> ModelFile {
 /// CRAWLER: a squat captured tank: two wide tracks, a boxy hull with a sloped glacis, one fixed forward
 /// gun, a crystal cluster on the engine deck. 44 px long, 38 wide.
 pub fn crawler() -> ModelFile {
+    crawler_armed(false)
+}
+
+/// The CRAWLER about to fire: its muzzle glows `hot`.
+pub fn crawler_armed(glow: bool) -> ModelFile {
     let mut m = Mesh::new(vec![hull(), hull_dark(), crystal(), weapon(), Material::glow(HOT)]);
     for s in [-1.0, 1.0] {
         let (a, b) = if s < 0.0 { (-19.0, -11.0) } else { (11.0, 19.0) };
@@ -188,10 +201,34 @@ pub fn crawler() -> ModelFile {
     m.poly(&[[-8.0, 13.0, 13.0], [8.0, 13.0, 13.0], [11.0, 22.0, 5.0], [-11.0, 22.0, 5.0]], 0);
     m.sym(&[[8.0, 13.0, 13.0], [11.0, 16.0, 4.0], [11.0, 22.0, 5.0]], 0);
     m.tube([0.0, 14.0, 11.0], [0.0, 27.0, 11.0], 2.0, 6, 3, 4);
+    if glow {
+        m.tube([0.0, 22.0, 11.5], [0.0, 29.0, 11.5], 2.8, 6, 4, 4);
+    }
     m.shard([-4.0, -12.0, 13.0], [-6.0, -18.0, 20.0], 3.0, 2);
     m.shard([3.0, -13.0, 13.0], [5.0, -19.0, 19.0], 3.0, 2);
     m.shard([0.0, -8.0, 13.0], [0.0, -10.0, 22.0], 2.5, 2);
     model("enemy.common.crawler", (32, 64), &[("yaw", 16.0)], m)
+}
+
+/// A ground unit's wreck: a scorched crater, a ring of broken slabs tipped outward around a dark pit
+/// with a few dying crystal shards. `r` is the outer radius (20: PILLBOX, HATCH; 24: CRAWLER).
+pub fn wreck(r: f64) -> ModelFile {
+    let mut m = Mesh::new(vec![hull_dark(), Material::glow(VOID), crystal()]);
+    m.poly(&Mesh::ring(10, r * 0.55, 0.5, 0.0), 1);
+    let n = 9;
+    for k in 0..n {
+        let a0 = k as f64 / n as f64 * 2.0 * PI + 0.2 * (k % 2) as f64;
+        let a1 = a0 + 2.0 * PI / n as f64 * 0.8;
+        let (ri, ro) = (r * 0.55, r * (0.85 + 0.15 * ((k * 7 % 5) as f64 / 4.0)));
+        let h = 3.0 + (k * 5 % 4) as f64;
+        let p = |a: f64, rr: f64, z: f64| -> V3 { [rr * a.cos(), rr * a.sin(), z] };
+        // A slab tipped up at its inner edge.
+        m.poly(&[p(a0, ri, h), p(a1, ri, h), p(a1, ro, 0.0), p(a0, ro, 0.0)], 0);
+    }
+    m.shard([2.0, 1.0, 0.5], [4.0, 4.0, 6.0], 2.0, 2);
+    m.shard([-3.0, -2.0, 0.5], [-5.0, -1.0, 5.0], 1.5, 2);
+    let canvas = if r > 21.0 { (32, 64) } else { (22, 44) };
+    model(&format!("wreck{}", r as u32), canvas, &[], m)
 }
 
 /// KEELBREAKER: a captured destroyer, 256 lines long and about 52 wide: pointed bow, square stern, a

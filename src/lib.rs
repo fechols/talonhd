@@ -10,10 +10,12 @@
 
 #![cfg_attr(not(feature = "host"), no_std)]
 
+pub mod audio;
 pub mod boss;
 pub mod demo;
 pub mod format;
 pub mod game;
+pub mod ground;
 pub mod hud;
 pub mod hw;
 pub mod midboss;

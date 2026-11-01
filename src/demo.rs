@@ -38,7 +38,16 @@ pub const KEEL_ROLLS: u16 = 5;
 pub const KEEL_FRAME: u16 = SHIELD_FRAME + PLAYER_BANKS * SHIELD_STEPS;
 pub const TURRET_YAWS: u16 = 16;
 pub const TURRET_FRAME: u16 = KEEL_FRAME + KEEL_ROLLS;
-pub const FRAMES: u16 = TURRET_FRAME + TURRET_YAWS;
+/// Ground and sea units (`crate::ground`): SKIFF at 16 headings; PILLBOX and CRAWLER at 16 headings, then
+/// the same 16 armed (muzzles glowing `hot`); HATCH door poses closed to open; wrecks (small, large).
+pub const UNIT_YAWS: u16 = 16;
+pub const SKIFF_FRAME: u16 = TURRET_FRAME + TURRET_YAWS;
+pub const PILLBOX_FRAME: u16 = SKIFF_FRAME + UNIT_YAWS;
+pub const HATCH_POSES: u16 = 6;
+pub const HATCH_FRAME: u16 = PILLBOX_FRAME + 2 * UNIT_YAWS;
+pub const CRAWLER_FRAME: u16 = HATCH_FRAME + HATCH_POSES;
+pub const WRECK_FRAME: u16 = CRAWLER_FRAME + 2 * UNIT_YAWS;
+pub const FRAMES: u16 = WRECK_FRAME + 2;
 
 pub const BOSS_SIZE: u16 = 512;
 /// Screen line of the boss canvas centre: it hovers at the top, mostly above the screen.
@@ -74,6 +83,14 @@ pub const KEEL_W: u16 = 32;
 pub const KEEL_H: u16 = 256;
 pub const TURRET_W: u16 = 16;
 pub const TURRET_H: u16 = 32;
+pub const SKIFF_W: u16 = 28;
+pub const SKIFF_H: u16 = 56;
+pub const PILLBOX_W: u16 = 22;
+pub const PILLBOX_H: u16 = 44;
+pub const HATCH_W: u16 = 22;
+pub const HATCH_H: u16 = 44;
+pub const CRAWLER_W: u16 = 32;
+pub const CRAWLER_H: u16 = 64;
 pub const SHIELD_W: u16 = 48;
 pub const SHIELD_H: u16 = 88;
 

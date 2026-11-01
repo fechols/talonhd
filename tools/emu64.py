@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Run the linked TALON HD PRG in a 6502 interpreter with just enough C64 around it to find faults that
 only the 6502 build shows: `$01` banking of `$D000-$DFFF` (I/O or RAM), a REU that executes DMAs against
-the level image, a raster counter and CIA 2 timer driven by the cycle count, and an idle joystick. No
-video, no IRQs (the HUD multiplexer is not modelled), no sound.
+the level image, a raster counter and CIA 2 timers A+B driven by the cycle count, an idle joystick, and
+the C64 Ultimate sampler's timing ($DF20/$DF40: mapping probe, one-shot completion, the repeating ring's
+play position; audio.rs). No video, no IRQs (the HUD multiplexer is not modelled).
+
+At the end it checks the music: the producer stays ahead of the modelled sampler, and the ring holds the
+track's samples as the encoder decodes them (output/audio/<cue>.preview.wav, rounded to 8 bits).
 
     python tools/emu64.py [--prg dist/talonhd.prg] [--reu dist/talonhd.reu] [--elf dist/talonhd.elf]
                           [--frames N] [--trace N]
@@ -46,6 +50,9 @@ class C64(Cpu):
         self.dmas = collections.deque(maxlen=40)
         self.flips = 0
         self.alarm = None
+        self.one_shot_end = None
+        self.play_start = None
+        self.rate = 16000.0
 
     def io_on(self):
         return self.mem[1] & 3 != 0 and self.mem[1] & 4 != 0
@@ -61,9 +68,14 @@ class C64(Cpu):
                 return self.raster() & 0xFF
             if a == 0xD011:
                 return (self.io[0x11] & 0x7F) | (0x80 if self.raster() > 255 else 0)
-            if a in (0xDD04, 0xDD05):
-                t = 0xFFFF - (self.cycles // 64) % 0x10000
-                return t & 0xFF if a == 0xDD04 else t >> 8
+            if 0xDD04 <= a <= 0xDD07:
+                # Timers A and B chained: one 32-bit down-counter at 1 MHz.
+                t = 0xFFFFFFFF - (self.cycles // 64) % 0x100000000
+                return (t >> (8 * (a - 0xDD04))) & 0xFF
+            if a == 0xDF21:
+                return 0x10  # the sampler's mapping probe
+            if a == 0xDF20:
+                return int(self.one_shot_end is not None and self.cycles >= self.one_shot_end)
             if a in (0xDC00, 0xDC01):
                 return 0xFF
             if a == 0xDF00:
@@ -80,8 +92,27 @@ class C64(Cpu):
                 self.dma(v)
             if a == 0xDD00:
                 self.flips += 1
+            if a == 0xDF20:
+                self.sampler_gate(v)
             return
         self.mem[a] = v
+
+    def sampler_gate(self, v):
+        r = self.io
+        if not v & 1:
+            self.one_shot_end = None
+            return
+        divider = r[0xF2E] << 8 | r[0xF2F]
+        self.rate = 6_250_000 / (divider + 2)
+        length = r[0xF29] << 16 | r[0xF2A] << 8 | r[0xF2B]
+        frames = length // 4 if v & 0x10 else length
+        if v & 2:
+            self.play_start = self.cycles
+        else:
+            self.one_shot_end = self.cycles + int(frames / self.rate * 64_000_000)
+
+    def played(self):
+        return int((self.cycles - self.play_start) / 64_000_000 * self.rate) if self.play_start is not None else 0
 
     def dma(self, cmd):
         r = self.io
@@ -103,6 +134,37 @@ class C64(Cpu):
         r[0xF02], r[0xF03] = c64e & 0xFF, c64e >> 8
         r[0xF04], r[0xF05], r[0xF06] = reue & 0xFF, (reue >> 8) & 0xFF, reue >> 16
         r[0xF07], r[0xF08] = 1, 0
+
+
+# audio::Player at $C800 (#[repr(C)], 6502 alignment 1): offsets of the fields checked here.
+PLAYER = 0xC800
+P_PRODUCED, P_PLAYED, P_TICKS, P_STATE, P_FAULT, P_UNDERRUNS = 120, 124, 128, 138, 139, 140
+RING, RING_SAMPLES, GUARD = 0xFE8000, 32768, 2048
+
+
+def check_music(cpu, reu, wav='output/audio/cue.stage_s1.preview.wav'):
+    m = cpu.mem
+    u32 = lambda o: int.from_bytes(m[PLAYER + o:PLAYER + o + 4], 'little')
+    state, fault, under = m[PLAYER + P_STATE], m[PLAYER + P_FAULT], m[PLAYER + P_UNDERRUNS]
+    produced, played, ticks = u32(P_PRODUCED), u32(P_PLAYED), u32(P_TICKS)
+    pos = cpu.played()
+    print(f'music: state {state} fault {fault} underruns {under}, clock {ticks} ticks/12288, produced {produced}, '
+          f'player estimate {played}, sampler at {pos}')
+    if state != 1:
+        return
+    if not pos < produced <= pos + RING_SAMPLES - GUARD + 512:
+        print(f'MUSIC FAULT: the ring is not ahead of the sampler (lead {produced - pos})')
+    try:
+        pcm = Path(wav).read_bytes()[44:]
+    except OSError:
+        return
+    total = len(pcm) // 2
+    bad = 0
+    for k in range(max(0, produced - (RING_SAMPLES - GUARD)), produced):
+        s = int.from_bytes(pcm[2 * (k % total):2 * (k % total) + 2], 'little', signed=True)
+        want = max(-128, min(127, (s + 128) >> 8)) & 0xFF
+        bad += reu[RING + (k & (RING_SAMPLES - 1))] != want
+    print(f'music: {bad} of {RING_SAMPLES - GUARD} ring samples differ from the encoder decode')
 
 
 def main():
@@ -167,6 +229,7 @@ def main():
             break
     else:
         print(f'ran {cpu.flips} flips, {steps} instructions, no fault')
+        check_music(cpu, reu)
         return
     print('last instructions:')
     for pc in list(last)[-args.trace:]:

@@ -223,7 +223,29 @@ pub fn demo_frames() -> Vec<SpriteImage> {
     let turret = crate::hand::keelbreaker_turret().render_all();
     assert_eq!(turret.len(), demo::TURRET_YAWS as usize);
     out.extend(turret);
+    out.extend(ground_frames());
     assert_eq!(out.len(), demo::FRAMES as usize);
+    out
+}
+
+/// The ground and sea units, in [`demo`] order from `SKIFF_FRAME` (hand-built).
+pub fn ground_frames() -> Vec<SpriteImage> {
+    use crate::hand;
+    let mut out = Vec::new();
+    for m in [hand::skiff(), hand::pillbox_armed(false), hand::pillbox_armed(true)] {
+        let f = m.render_all();
+        assert_eq!(f.len(), demo::UNIT_YAWS as usize);
+        out.extend(f);
+    }
+    assert_eq!(hand::HATCH_POSES, demo::HATCH_POSES as usize);
+    for k in 0..hand::HATCH_POSES {
+        out.extend(hand::hatch(k).render_all());
+    }
+    for m in [hand::crawler_armed(false), hand::crawler_armed(true)] {
+        out.extend(m.render_all());
+    }
+    out.extend(hand::wreck(20.0).render_all());
+    out.extend(hand::wreck(24.0).render_all());
     out
 }
 

@@ -116,3 +116,17 @@ hud_irq_enable:
     cli
     rts
 .size hud_irq_enable, .-hud_irq_enable
+
+; Gate both sampler voices on the same tick (audio.rs: the right voice plays the ring 10 ms behind the
+; left). Called with I/O banked in.
+.section .text.audio_gate,"ax",@progbits
+.globl audio_gate
+.type audio_gate,@function
+audio_gate:
+    sei
+    lda #3
+    sta $df20
+    sta $df40
+    cli
+    rts
+.size audio_gate, .-audio_gate

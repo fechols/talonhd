@@ -89,6 +89,15 @@ pub mod header {
     pub const BG_ROWS: usize = 32;
     /// u32: REU address of the HUD's static sprite blocks (`HUD_BLOCKS` × 64 bytes).
     pub const HUD: usize = 36;
+    /// u32: REU address of the stage music, a DLT5 asset (`crate::audio`); 0 = none.
+    pub const MUSIC: usize = 40;
+    /// u32: REU address of the paged code phases (`crate::paging`): one `PHASE_SLOT` per id, in id order
+    /// (the `BOOT` slot unused: the PRG carries that one); 0 = none.
+    pub const PHASES: usize = 44;
+    /// u16 × `paging::PHASES`: each phase's length.
+    pub const PHASE_LENS: usize = 48;
+    /// u16: the phases' stamp (`paging::stamp`); the PRG carries the same one (patched in by the build).
+    pub const PHASE_STAMP: usize = 62;
 }
 
 /// Frame directory record.
