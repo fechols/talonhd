@@ -33,24 +33,28 @@
 //! 8 lines of a cell are adjacent. A visible run of opaque bytes is thus a
 //! chain of ≤8-byte DMAs whose REU source address simply auto-increments.
 //!
-//! Each column has a sorted segment list (4 bytes per segment):
+//! Each phase is one contiguous **block**, laid out for the C64 to fetch with as few DMAs as possible
+//! and scatter with the CPU (an I/O register write costs 16 RAM stores on the C64U, `docs/validation.md`):
 //!
-//! | byte | Run (b1 bits 7,6 clear) | Mix (bit 7 set)              | Skip (bit 6 set)       |
-//! |------|-------------------------|------------------------------|------------------------|
-//! | b0   | line bits 0-7           | line bits 0-7                | line bits 0-7          |
-//! | b1   | line bit 8 (bit 0)      | line bit 8 + `$80`           | line bit 8 + `$40`     |
-//! | b2   | run length lo           | sprite bits (already masked) | gap lo                 |
-//! | b3   | run length hi           | keep-mask for the destination| gap hi                 |
+//! ```text
+//! block:  band table: BANDS + 1 u24 band starts (relative to the block), then the bands
+//! band:   WB + 1 u16 column offsets (relative to the band; entry WB is the band's end), then WB records
+//! record: u8 item count, then items in line order:
+//!           Run  line lo, line hi (bit 0), length, then `length` pixel bytes (fully opaque bytes)
+//!           Mix  line lo, line hi | ITEM_MIX, sprite bits, keep-mask (dst = dst & keep | bits)
+//! ```
 //!
-//! Runs cover fully opaque bytes (pure DMA); Mix entries cover bytes with
-//! both opaque and transparent pixels (CPU: `dst = dst & keep | bits`).
-//! A run's REU source is `DATA + line`. The column's data stores only run
-//! bytes: a Skip, placed just before the run that follows a gap, subtracts
-//! the gap's length from `DATA`, so gaps between runs (a sprite's holes, the
-//! space between a boss's legs) cost 4 bytes instead of their length.
+//! Bands are `1 << BAND_SHIFT` lines (32 for tall sprites, one band otherwise); runs never cross a band.
+//! A sprite's on-screen columns of a band are one contiguous byte range, so drawing costs a record fetch,
+//! then per visible band an offsets fetch and one data fetch per `CHUNK` (`render::draw_sprite`), and the
+//! CPU kernel (`render::draw_cols`, `asm/blit.S`) copies the bytes into the bitmap's cell layout.
+//! Holes cost nothing (data is inline per run).
 
 pub const MAGIC: [u8; 8] = *b"TALONHD1";
 pub const HEADER_LEN: u32 = 64;
+/// The panorama frame table, right after the header: `BG_MASK + 1` u32 REU addresses, one per animation
+/// frame of the level (each a whole panorama, `BG_ROWS` × 320 bytes); frame 0 is `BACKGROUND`.
+pub const BG_TABLE: u32 = HEADER_LEN;
 pub const MAX_SPRITE_SIZE: u16 = 512;
 /// Byte columns of a 512-wide sprite at phase 3.
 pub const MAX_COLUMNS: u16 = (MAX_SPRITE_SIZE + 3 + 3) / 4;
@@ -83,6 +87,10 @@ pub mod header {
     pub const COLOR: usize = 24;
     /// u8: global screen RAM byte (code 01 high nibble, code 10 low nibble).
     pub const SCREEN: usize = 25;
+    /// u8: animated level: panorama frames − 1 (a power of two less one); 0 = one still panorama.
+    pub const BG_MASK: usize = 26;
+    /// u8: animated level: log2 of the ticks each panorama frame is shown.
+    pub const BG_SHIFT: usize = 27;
     /// u32: simple additive checksum of bytes [HEADER_LEN, SIZE).
     pub const CHECKSUM: usize = 28;
     /// u16: background panorama height in cell rows (≥ 25).
@@ -94,44 +102,47 @@ pub mod header {
     /// u32: REU address of the paged code phases (`crate::paging`): one `PHASE_SLOT` per id, in id order
     /// (the `BOOT` slot unused: the PRG carries that one); 0 = none.
     pub const PHASES: usize = 44;
-    /// u16 × `paging::PHASES`: each phase's length.
+    /// u8 × `paging::PHASES` (up to 16): each phase's length in 256-byte pages.
     pub const PHASE_LENS: usize = 48;
     /// u16: the phases' stamp (`paging::stamp`); the PRG carries the same one (patched in by the build).
-    pub const PHASE_STAMP: usize = 62;
+    pub const PHASE_STAMP: usize = 34;
 }
 
-/// Frame directory record.
-pub const FRAME_RECORD: u32 = 80;
+/// Frame directory record (one per frame, `FRAME_RECORD` bytes).
+pub const FRAME_RECORD: u32 = 32;
 pub mod frame {
     /// u16 width, u16 height.
     pub const W: usize = 0;
     pub const H: usize = 2;
     /// u8: stored phases, 4 (any x) or 1 (phase 0 only, drawn at `x & !3`).
     pub const PHASE_COUNT: usize = 4;
-    /// Four phase records follow.
+    /// u8: log2 of the band height in lines (`BAND_SHIFT_TALL` or `BAND_SHIFT_ONE`).
+    pub const BAND_SHIFT: usize = 5;
+    /// u8: number of bands.
+    pub const BANDS: usize = 6;
+    /// Four phase records (`PHASE_LEN` bytes each, see [`super::phase`]).
     pub const PHASES: usize = 8;
-    pub const PHASE_LEN: usize = 16;
+    pub const PHASE_LEN: usize = 6;
 }
 pub mod phase {
     /// u8: number of byte columns.
     pub const WB: usize = 0;
-    /// u32: REU address of the column table (COLUMN_ENTRY bytes per column).
-    pub const COLUMNS: usize = 8;
+    /// u24: REU address of the phase's block.
+    pub const BLOCK: usize = 1;
+    /// u16: the block's length in bytes (`0xFFFF`: that or more).
+    pub const LEN: usize = 4;
 }
-pub const COLUMN_ENTRY: u16 = 8;
-pub mod column {
-    /// u24: REU address of the column's pixel bytes (line 0).
-    pub const DATA: usize = 0;
-    /// u24: REU address of the column's segment list.
-    pub const SEGS: usize = 3;
-    /// u16: segment count.
-    pub const COUNT: usize = 6;
-}
-pub const SEGMENT_LEN: u16 = 4;
-pub const SEG_MIX: u8 = 0x80;
-pub const SEG_SKIP: u8 = 0x40;
-/// Gaps shorter than this are stored as data (a Skip costs 4 bytes).
-pub const MIN_SKIP: usize = 8;
+/// Bands of sprites taller than `BAND_LINES`: 32 lines, so a band of 40 on-screen columns fits `CHUNK`.
+pub const BAND_SHIFT_TALL: u8 = 5;
+/// Sprites up to this tall are one band.
+pub const BAND_LINES: u16 = 32;
+/// The band shift of a one-band sprite (any line >> 9 is band 0).
+pub const BAND_SHIFT_ONE: u8 = 9;
+/// Column record items: a Run is `line lo, line hi (bit 0), length (1..=255)` then its bytes; a Mix is
+/// `line lo, line hi (bit 0) | ITEM_MIX, sprite bits (already masked), keep-mask for the destination`.
+pub const ITEM_MIX: u8 = 0x80;
+pub const RUN_HEADER: u16 = 3;
+pub const MIX_LEN: u16 = 4;
 
 #[inline(always)]
 pub fn le16(b: &[u8], at: usize) -> u16 {

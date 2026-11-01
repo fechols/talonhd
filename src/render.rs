@@ -4,18 +4,16 @@
 //!
 //! Per frame: DMA the 25 visible cell rows of the vertical panorama into the
 //! back buffer (one contiguous block), sort sprites by z, then paint each
-//! sprite back to front:
-//! 1. Fetch the column table entries for the on-screen byte columns.
-//! 2. Per column, fetch its segment list and run [`Hw::draw_column`]:
-//!    opaque runs become chained ≤8-byte DMAs (split at cell rows), mixed
-//!    bytes are blended by the CPU.
+//! sprite back to front ([`draw_sprite`]): its on-screen columns are fetched
+//! a band at a time with as few DMAs as possible and scattered into the
+//! bitmap by the CPU ([`Hw::draw_cols`]); small sprites come from a RAM cache.
 //!
 //! All four multicolor codes are global ([`Palette`]), so nothing ever
 //! writes cell attributes per frame and sprites can't clash.
 //!
 //! [`present`] then shows the buffer; call it during vertical blank.
 
-use crate::format::{self, column, frame, header, le16, le24, le32, phase};
+use crate::format::{self, frame, header, le16, le24, le32, phase};
 use crate::hw::{self, Hw};
 use crate::hud;
 use crate::layout::{self, Buffer, job};
@@ -60,7 +58,11 @@ impl Palette {
 /// Parsed REU image header.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Image {
+    /// REU address of the panorama shown now (`background_at` picks the animation frame).
     pub background: u32,
+    /// Animation frames − 1 and log2 ticks per frame (`format::header::BG_MASK`, `BG_SHIFT`).
+    pub bg_mask: u8,
+    pub bg_shift: u8,
     /// Background panorama height in cell rows.
     pub bg_rows: u16,
     pub palette: Palette,
@@ -73,7 +75,7 @@ pub struct Image {
     pub music: u32,
     /// REU address of the paged code phases, their lengths and stamp (`format::header::PHASES`).
     pub phases: u32,
-    pub phase_lens: [u16; crate::paging::PHASES as usize],
+    pub phase_lens: [u8; crate::paging::PHASES as usize],
     pub phase_stamp: u16,
     /// Image size and the additive checksum of bytes `HEADER_LEN..size`.
     pub size: u32,
@@ -107,6 +109,8 @@ pub fn read_image<H: Hw + ?Sized>(hw: &mut H) -> Option<Image> {
     }
     Some(Image {
         background: le24(&h, header::BACKGROUND),
+        bg_mask: h[header::BG_MASK],
+        bg_shift: h[header::BG_SHIFT],
         bg_rows: le16(&h, header::BG_ROWS),
         palette: Palette { d021: h[header::D021], screen: h[header::SCREEN], color: h[header::COLOR] },
         border: h[header::BORDER],
@@ -116,9 +120,9 @@ pub fn read_image<H: Hw + ?Sized>(hw: &mut H) -> Option<Image> {
         music: le24(&h, header::MUSIC),
         phases: le24(&h, header::PHASES),
         phase_lens: {
-            let mut l = [0u16; crate::paging::PHASES as usize];
+            let mut l = [0u8; crate::paging::PHASES as usize];
             for (i, v) in l.iter_mut().enumerate() {
-                *v = le16(&h, header::PHASE_LENS + 2 * i);
+                *v = h[header::PHASE_LENS + i];
             }
             l
         },
@@ -272,6 +276,14 @@ impl Scroll {
     }
 }
 
+/// The REU address of the panorama frame for tick `t` (its low byte): an animated level is a loop of
+/// whole panorama copies, frame `(t >> bg_shift) & bg_mask`, listed in `format::BG_TABLE`.
+pub fn background_at<H: Hw + ?Sized>(hw: &mut H, img: &Image, t: u8) -> u32 {
+    let k = (t >> img.bg_shift) & img.bg_mask;
+    let e: [u8; 4] = record(hw, format::BG_TABLE + 4 * k as u32);
+    le24(&e, 0)
+}
+
 /// DMA the visible window of the panorama: 25 contiguous cell rows.
 /// With `scroll.col` the copy starts `8 * col` bytes earlier (one cell column per 8 bytes), so every
 /// cell row moves right by `col` columns; the columns that come from the neighbouring cell row are
@@ -310,20 +322,58 @@ pub fn present<H: Hw + ?Sized>(hw: &mut H, buf: Buffer, scroll: Scroll) {
     hw.poke(0xD016, scroll.d016());
 }
 
+/// Small-sprite cache slot layout: tag (`frame + 1`, u16; 0 = empty), x phase, byte columns, height
+/// (u16), then the block. One-band blocks up to `SLOT_BLOCK` bytes are kept (bullets, shots, SPARKs), so
+/// drawing them again costs no REU access at all.
+const SLOT_META: u16 = 8;
+const SLOT_BLOCK: u16 = layout::SPRITE_CACHE_SLOT - SLOT_META;
+
+/// Forget every cached small sprite (call once after boot: the cache's RAM held anything before).
+pub fn reset_sprite_cache<H: Hw + ?Sized>(hw: &mut H) {
+    for i in 0..layout::SPRITE_CACHE_SLOTS {
+        let slot = layout::SPRITE_CACHE + i * layout::SPRITE_CACHE_SLOT;
+        hw.poke(slot, 0);
+        hw.poke(slot + 1, 0);
+    }
+}
+
 /// Draw one sprite at bitmap coordinates (`y` is a bitmap line).
+///
+/// Small one-band sprites are drawn from the RAM cache (fetched once). Others: the frame record, then
+/// for each band with visible lines its column offsets and, one `CHUNK` at a time, the on-screen
+/// columns' records; the CPU kernel ([`Hw::draw_cols`]) scatters them into the bitmap.
+#[inline(never)]
 pub fn draw_sprite<H: Hw + ?Sized>(hw: &mut H, img: &Image, buf: Buffer, s: &Sprite) {
     if s.frame >= img.frames {
         return;
     }
-    let rec_addr = img.directory + s.frame as u32 * format::FRAME_RECORD;
-    let f: [u8; 8] = record(hw, rec_addr);
-    let h = le16(&f, frame::H) as i16;
-
-    // A 1-phase frame only has phase 0: it lands on x & !3.
-    let p = if f[frame::PHASE_COUNT] == 1 { 0 } else { (s.x & 3) as u32 };
+    let xp = (s.x & 3) as u16;
+    let slot = layout::SPRITE_CACHE
+        + ((s.frame.wrapping_mul(4) + xp) & (layout::SPRITE_CACHE_SLOTS - 1)) * layout::SPRITE_CACHE_SLOT;
+    let tag = s.frame + 1;
+    let (wb, h, block_ram, block, shift) = if peek16(hw, slot) == tag && hw.peek(slot + 2) == xp as u8 {
+        (hw.peek(slot + 3) as i16, peek16(hw, slot + 4) as i16, slot + SLOT_META, 0u32, format::BAND_SHIFT_ONE)
+    } else {
+        let f: [u8; 32] = record(hw, img.directory + s.frame as u32 * format::FRAME_RECORD);
+        // A 1-phase frame only has phase 0: it lands on x & !3.
+        let p = if f[frame::PHASE_COUNT] == 1 { 0 } else { xp as usize };
+        let ph = frame::PHASES + p * frame::PHASE_LEN;
+        let wb = f[ph + phase::WB] as i16;
+        let h = le16(&f, frame::H) as i16;
+        let block = le24(&f, ph + phase::BLOCK);
+        let len = le16(&f, ph + phase::LEN);
+        if f[frame::BANDS] == 1 && len <= SLOT_BLOCK {
+            hw::fetch(hw, block, slot + SLOT_META, len);
+            poke16(hw, slot, tag);
+            hw.poke(slot + 2, xp as u8);
+            hw.poke(slot + 3, wb as u8);
+            poke16(hw, slot + 4, h as u16);
+            (wb, h, slot + SLOT_META, 0, format::BAND_SHIFT_ONE)
+        } else {
+            (wb, h, 0, block, f[frame::BAND_SHIFT])
+        }
+    };
     let base = s.x >> 2;
-    let ph: [u8; 16] = record(hw, rec_addr + (frame::PHASES as u32) + p * frame::PHASE_LEN as u32);
-    let wb = ph[phase::WB] as i16;
 
     // Horizontal clip: byte columns [j0, j1) are on screen.
     let j0 = if base < 0 { -base } else { 0 };
@@ -331,90 +381,98 @@ pub fn draw_sprite<H: Hw + ?Sized>(hw: &mut H, img: &Image, buf: Buffer, s: &Spr
     if j0 >= j1 {
         return;
     }
-    // Vertical clip: sprite lines [top, bot) are on screen. The screen is a
-    // whole number of cell rows, so clipped lines never split a cell row.
+    // Vertical clip: sprite lines [top, bot) are on screen.
     let top = if s.y < 0 { -s.y } else { 0 };
     let bot = h.min(layout::HEIGHT - s.y);
     if top >= bot {
         return;
     }
-
     hw.mark(0);
-    // Pixels, one column at a time.
-    let ncols = (j1 - j0) as u16;
-    let cols = le24(&ph, phase::COLUMNS) + j0 as u32 * format::COLUMN_ENTRY as u32;
-    hw::fetch(hw, cols, layout::COL_TABLE, ncols * format::COLUMN_ENTRY);
     poke16(hw, layout::JOB + job::Y, s.y as u16);
     poke16(hw, layout::JOB + job::TOP, top as u16);
     poke16(hw, layout::JOB + job::BOT, bot as u16);
-    let mut entry = layout::COL_TABLE;
-    let mut dst = buf.bitmap.wrapping_add(((base + j0) as u16) << 3);
-    for _ in 0..ncols {
-        let count = peek16(hw, entry + column::COUNT as u16);
-        if count != 0 {
-            let segs = hw.peek(entry + 3) as u32
-                | (hw.peek(entry + 4) as u32) << 8
-                | (hw.peek(entry + 5) as u32) << 16;
-            hw::fetch(hw, segs, layout::SEG_BUF, count * format::SEGMENT_LEN);
-            poke16(hw, layout::JOB + job::DST, dst);
-            for i in 0..3 {
-                let b = hw.peek(entry + column::DATA as u16 + i);
-                hw.poke(layout::JOB + job::DATA + i, b);
+    let dst = buf.bitmap.wrapping_add(((base + j0) as u16) << 3);
+    let ncols = (j1 - j0) as u16;
+
+    if block_ram != 0 {
+        // Cached: one band, already in RAM.
+        let band = block_ram + peek16(hw, block_ram);
+        let at = band + peek16(hw, band + 2 * j0 as u16);
+        poke16(hw, layout::JOB + job::DST, dst);
+        poke16(hw, layout::JOB + job::SRC, at);
+        hw.poke(layout::JOB + job::NCOLS, ncols as u8);
+        hw.mark(1);
+        hw.draw_cols();
+        hw.mark(2);
+        return;
+    }
+
+    // The visible bands' starts, then per band its on-screen column offsets and records.
+    let (b0, b1) = ((top as u16) >> shift, ((bot - 1) as u16) >> shift);
+    let nb = b1 - b0 + 1;
+    hw::fetch(hw, block + 3 * b0 as u32, layout::RECORD, 3 * nb);
+    for b in 0..nb {
+        let r = layout::RECORD + 3 * b;
+        let band = block + (hw.peek(r) as u32 | (hw.peek(r + 1) as u32) << 8 | (hw.peek(r + 2) as u32) << 16);
+        hw::fetch(hw, band + 2 * j0 as u32, layout::OFFS, 2 * (ncols + 1));
+        let mut j = 0;
+        while j < ncols {
+            // As many columns as fit the chunk (always at least one: a band column is small).
+            let start = peek16(hw, layout::OFFS + 2 * j);
+            let mut k = j + 1;
+            while k < ncols && peek16(hw, layout::OFFS + 2 * (k + 1)) - start <= layout::CHUNK_LEN {
+                k += 1;
             }
-            poke16(hw, layout::JOB + job::COUNT, count);
+            let end = peek16(hw, layout::OFFS + 2 * k);
+            hw::fetch(hw, band + start as u32, layout::CHUNK, end - start);
+            poke16(hw, layout::JOB + job::DST, dst.wrapping_add(j << 3));
+            poke16(hw, layout::JOB + job::SRC, layout::CHUNK);
+            hw.poke(layout::JOB + job::NCOLS, (k - j) as u8);
             hw.mark(1);
-            hw.draw_column();
+            hw.draw_cols();
             hw.mark(2);
+            j = k;
         }
-        entry += format::COLUMN_ENTRY;
-        dst = dst.wrapping_add(8);
     }
 }
 
-/// Reference column kernel (the C64 build normally uses `asm/blit.S`).
-pub fn draw_column<H: Hw + ?Sized>(hw: &mut H) {
-    let dst = peek16(hw, layout::JOB + job::DST);
+/// Reference sprite kernel (the C64 build uses `asm/blit.S`): draw `NCOLS` consecutive column records
+/// from RAM at `SRC` into the bitmap column at `DST` and the ones right of it, lines clipped to
+/// [`TOP`, `BOT`), sprite line `l` at screen line `Y + l`.
+pub fn draw_cols<H: Hw + ?Sized>(hw: &mut H) {
+    let mut dst = peek16(hw, layout::JOB + job::DST);
     let y = peek16(hw, layout::JOB + job::Y);
     let top = peek16(hw, layout::JOB + job::TOP);
     let bot = peek16(hw, layout::JOB + job::BOT);
-    let mut data = hw.peek(layout::JOB + job::DATA) as u32
-        | (hw.peek(layout::JOB + job::DATA + 1) as u32) << 8
-        | (hw.peek(layout::JOB + job::DATA + 2) as u32) << 16;
-    let count = peek16(hw, layout::JOB + job::COUNT);
-    let mut seg = layout::SEG_BUF;
-    for _ in 0..count {
-        let b0 = hw.peek(seg);
-        let b1 = hw.peek(seg + 1);
-        let b2 = hw.peek(seg + 2);
-        let b3 = hw.peek(seg + 3);
-        seg += format::SEGMENT_LEN;
-        let line = b0 as u16 | ((b1 & 1) as u16) << 8;
-        if line >= bot {
-            break;
-        }
-        if b1 & format::SEG_SKIP != 0 {
-            data = data.wrapping_sub(b2 as u32 | (b3 as u32) << 8) & 0xFF_FFFF;
-        } else if b1 & format::SEG_MIX != 0 {
-            if line >= top {
-                let a = dst.wrapping_add(layout::line_offset(y.wrapping_add(line)));
-                let v = hw.peek(a) & b3 | b2;
-                hw.poke(a, v);
-            }
-        } else {
-            let len = b2 as u16 | (b3 as u16) << 8;
-            let s = line.max(top);
-            let e = (line + len).min(bot);
-            if s < e {
-                hw::set_reu_addr(hw, data + s as u32);
-                let mut sl = y.wrapping_add(s);
-                let mut rem = e - s;
-                while rem != 0 {
-                    let n = (8 - (sl & 7)).min(rem);
-                    hw::chain_fetch(hw, dst.wrapping_add(layout::line_offset(sl)), n);
-                    sl += n;
-                    rem -= n;
+    let mut src = peek16(hw, layout::JOB + job::SRC);
+    let ncols = hw.peek(layout::JOB + job::NCOLS);
+    for _ in 0..ncols {
+        let items = hw.peek(src);
+        src += 1;
+        for _ in 0..items {
+            let b0 = hw.peek(src);
+            let b1 = hw.peek(src + 1);
+            let line = b0 as u16 | ((b1 & 1) as u16) << 8;
+            if b1 & format::ITEM_MIX != 0 {
+                if line >= top && line < bot {
+                    let a = dst.wrapping_add(layout::line_offset(y.wrapping_add(line)));
+                    let v = hw.peek(a) & hw.peek(src + 3) | hw.peek(src + 2);
+                    hw.poke(a, v);
                 }
+                src += format::MIX_LEN;
+            } else {
+                let len = hw.peek(src + 2) as u16;
+                let data = src + format::RUN_HEADER;
+                let (s, e) = (line.max(top), (line + len).min(bot));
+                let mut l = s;
+                while l < e {
+                    let v = hw.peek(data + (l - line));
+                    hw.poke(dst.wrapping_add(layout::line_offset(y.wrapping_add(l))), v);
+                    l += 1;
+                }
+                src = data + len;
             }
         }
+        dst = dst.wrapping_add(8);
     }
 }

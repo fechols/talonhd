@@ -29,9 +29,9 @@ impl Hw for Counting<'_> {
         self.dma_bytes += (self.m.stats.bytes - before) as u32;
         if self.in_column { self.links += 1 } else { self.other_dmas += 1 }
     }
-    fn draw_column(&mut self) {
+    fn draw_cols(&mut self) {
         self.in_column = true;
-        render::draw_column(self);
+        render::draw_cols(self);
         self.in_column = false;
     }
 }

@@ -61,11 +61,13 @@ pub struct Game {
     pub midboss: Midboss,
     /// SKIFFs, PILLBOXes, HATCHes and CRAWLERs (`crate::ground`).
     pub ground: Ground,
+    /// The attract mode's pilot (`crate::ace`): its plan and stick, replayed with the rest.
+    pub ace: crate::ace::Ace,
 }
 
 impl Game {
     pub const fn new() -> Game {
-        Game { world: World::new(), pilot: Pilot { bank: 0, deaths: 0, since_hit: 255 }, ticks: 0, boss: Boss { state: 0, hp: [0; 4], core: 0, broken: 0, turn: 0, pat: 0, step: 0, timer: 0, sink: 0 }, midboss: Midboss { state: 0, y: 0, hp: [0; 3], core: 0, clock: 0, turn: 0, pat: 0, step: 0, timer: 0, mines: [crate::midboss::Mine { t: 0, x: 0, y: 0, vx: 0, vy: 0 }; 2], yaw: [0; 3] }, ground: Ground::new() }
+        Game { world: World::new(), pilot: Pilot { bank: 0, deaths: 0, since_hit: 255 }, ticks: 0, boss: Boss { state: 0, hp: [0; 4], core: 0, broken: 0, turn: 0, pat: 0, step: 0, timer: 0, sink: 0, aim: [0; 2] }, midboss: Midboss { state: 0, y: 0, hp: [0; 3], core: 0, clock: 0, turn: 0, pat: 0, step: 0, timer: 0, mines: [crate::midboss::Mine { t: 0, x: 0, y: 0, vx: 0, vy: 0 }; 2], yaw: [0; 3], aim: [0; 2] }, ground: Ground::new(), ace: crate::ace::Ace::new() }
     }
 
     /// Power-on state in place (the C64 keeps `Game` zeroed in BSS and calls this at boot).
@@ -78,6 +80,7 @@ impl Game {
         self.boss = Boss::default();
         self.midboss = Midboss::default();
         self.ground = Ground::new();
+        self.ace = crate::ace::Ace::new();
     }
 
     /// One tick with this tick's input.
@@ -339,8 +342,9 @@ pub fn hud_state(g: &Game) -> hud::State {
 #[cfg(feature = "host")]
 pub fn replay(ticks: u32) -> Game {
     let mut g = Game::new();
+    let mut mind = crate::ace::Mind::new();
     for _ in 0..ticks {
-        let input = crate::sim::replay::autopilot(&g.world);
+        let input = crate::ace::fly(&mut g, &mut mind);
         g.step(input);
     }
     g

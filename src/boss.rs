@@ -67,7 +67,13 @@ pub struct Boss {
     pub timer: u8,
     /// Lines below her hover line while she sinks away (dying).
     pub sink: i16,
+    /// The playfield point of the weak part to shoot now (the attract pilot reads it, `crate::ace`); y
+    /// `NO_AIM` when there is none.
+    pub aim: [i16; 2],
 }
+
+/// `Boss::aim` / `Midboss::aim` y when nothing can be hit.
+pub const NO_AIM: i16 = -999;
 
 /// 48 directions (7.5° apart), index 0 straight down the screen, rising toward +x (screen right):
 /// (vx, vy) in Q6 px per tick at 1.25 px/tick (TALON's enemy bullets are Q6).
@@ -250,12 +256,16 @@ impl Boss {
 
     #[inline(never)]
     fn take_hits(&mut self, w: &mut World, sp: &[Sprite]) {
+        self.aim[1] = NO_AIM;
         if self.state == PHASE1 {
             for k in 0..4 {
                 if self.broken & (1 << TARGETS[k]) != 0 {
                     continue;
                 }
                 let (c, half) = target(k, sp);
+                if self.aim[1] == NO_AIM {
+                    self.aim = [c.0, c.1];
+                }
                 let n = hits(w, c, half);
                 if n != 0 {
                     self.hp[k] = self.hp[k].saturating_sub(n);
@@ -276,7 +286,9 @@ impl Boss {
                 self.timer = GAP_TICKS;
             }
         } else {
-            let n = hits(w, rim(sp), (90, 22));
+            let r = rim(sp);
+            self.aim = [r.0, r.1];
+            let n = hits(w, r, (90, 22));
             if n != 0 {
                 self.core = self.core.saturating_sub(n);
                 if self.core == 0 {

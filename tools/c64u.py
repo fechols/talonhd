@@ -112,7 +112,10 @@ class Device:
                 sock.sendall(struct.pack('<HH', 0xff1f, len(secret)) + secret)
                 if receive(sock, 1) != b'\x01':
                     raise RuntimeError('DMA authentication failed')
-            for offset in range(0, len(data), 32768):
+            # The first chunk (the image header, its magic) goes last: a booting PRG must never see a
+            # header before the rest has arrived (it would find the image incomplete and erase the magic).
+            offsets = list(range(0, len(data), 32768))
+            for offset in offsets[1:] + offsets[:1]:
                 chunk = data[offset:offset + 32768]
                 payload = (address + offset).to_bytes(3, 'little') + chunk
                 sock.sendall(struct.pack('<HH', 0xff07, len(payload)) + payload)
@@ -125,6 +128,7 @@ def status(dev):
     return dict(magic=st[0], flipping=st[1], front=st[2],
                 shown_t=st[4] | st[5] << 8, render_us=st[6] | st[7] << 8, hold=st[8],
                 background_us=st[10] | st[11] << 8,
+                audio_us=st[12] | st[13] << 8, step_us=st[14] | st[15] << 8,
                 profile_setup_columns_kernel=[st[i] | st[i + 1] << 8 for i in range(16, 22, 2)],
                 human=st[28]), st
 
@@ -139,6 +143,7 @@ def main():
     p = sub.add_parser('dump'); p.add_argument('out'); p.add_argument('--hold', action='store_true')
     p = sub.add_parser('hold'); p.add_argument('value', type=int)
     sub.add_parser('status')
+    sub.add_parser('bench')
     args = ap.parse_args()
     if not args.host:
         raise SystemExit('set --host or C64U_HOST')
@@ -159,6 +164,21 @@ def main():
         print('running', args.prg)
     elif args.cmd == 'hold':
         dev.write(HOLD, bytes([args.value]))
+    elif args.cmd == 'bench':
+        # The `bench` build's results (target-c64 main.rs `bench`): u16 us per test at $CA60.
+        raw = dev.read(0xCA60, 31)
+        if raw[30] != 0xBE:
+            raise SystemExit('bench not finished (run the bench build first)')
+        us = [raw[2 * i] | raw[2 * i + 1] << 8 for i in range(15)]
+        empty = us[0] / 2048
+        print(f'loop overhead: {empty * 1000:.0f} ns per iteration')
+        for k, n in enumerate([1, 2, 4, 8, 16, 64, 256, 512]):
+            per = us[1 + k] / 256 - empty
+            print(f'REU fetch {n:3} B (8 regs + command): {per:7.2f} us  ({per / n * 1000:6.0f} ns/B)')
+        names = ['chained 8-B link (4 regs)', '8 I/O writes', '8 RAM stores', '8 byte copies', '8 blends', '8 line lookups']
+        for k, nm in enumerate(names):
+            per = us[9 + k] / 2048 - empty
+            print(f'{nm:27}: {per:7.3f} us')
     elif args.cmd == 'status':
         print(status(dev)[0])
     elif args.cmd == 'dump':

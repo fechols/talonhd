@@ -32,9 +32,13 @@ pub const GROUND: u8 = 4;
 pub const AUDIO: u8 = 5;
 /// One-time music setup (`audio::tune`): sampler calibration, track header, voice setup.
 pub const TUNE: u8 = 6;
-pub const PHASES: u8 = 7;
+/// The attract pilot's thinking (`ace::think`: facts, goal, plan, the stick), paged after MOTOR.
+pub const ACE: u8 = 7;
+/// The attract pilot's lookahead (`ace::motor`), paged after ATTRACT's `ace::see`.
+pub const MOTOR: u8 = 8;
+pub const PHASES: u8 = 9;
 /// Phase names (`dist/phases/<name>.bin`, `.phase.<name>` in `link.ld`), in id order.
-pub const NAMES: [&str; PHASES as usize] = ["boss", "attract", "midboss", "boot", "ground", "audio", "tune"];
+pub const NAMES: [&str; PHASES as usize] = ["boss", "attract", "midboss", "boot", "ground", "audio", "tune", "ace", "motor"];
 
 /// The stamp tying a level image's phases to the PRG built with them: an additive checksum of every
 /// phase image but `BOOT`'s (`scripts/build-target.sh` patches it into the PRG; `bake` into the header).

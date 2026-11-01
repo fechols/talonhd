@@ -6,6 +6,8 @@
 //! - **One key light per stage** ([`Light`]: its time of day), shared by the stage's sprites and its
 //!   level geometry; S1's morning sun is upper-left and toward the viewer.
 //! - **Cast shadows** on level geometry ([`render_scene`], a shadow map along the light).
+//! - **Spotlights** ([`Spot`], [`render_scene_lit`]): real cone lights on level geometry (searchlights, a
+//!   lighthouse lamp), lifting what they hit along a void → dark → light ramp, with soft ray-traced shadows.
 //! - **Faceted:** one intensity per face (Lambert on the face normal).
 //! - **Ramps:** each material shades through an ordered list of codes, dark →
 //!   light. Intensity is quantized in half steps: a whole step is a solid
@@ -468,6 +470,148 @@ impl ShadowMap {
 /// Render level geometry (no orientation: model space is the world) under `light`, with shadows from
 /// `shadows` (built once for the whole scene). Pixels no triangle covers come out transparent.
 pub fn render_scene(mesh: &Mesh, view: View, light: &Light, shadows: &ShadowMap) -> SpriteImage {
+    render_scene_lit(mesh, view, light, shadows, &[], [0, 0, 0])
+}
+
+/// A spotlight: a cone from `pos` along `dir` (unit), full inside the half-angle `inner`, fading out at
+/// `outer` (radians); its lens is a disc `radius` wide across the beam (soft shadows), `strength` scales it.
+#[derive(Clone, Copy, Debug)]
+pub struct Spot {
+    pub pos: V3,
+    pub dir: V3,
+    pub inner: f64,
+    pub outer: f64,
+    pub radius: f64,
+    pub strength: f64,
+}
+
+/// Lens samples per shadow test: a centre and a ring.
+const LENS: usize = 8;
+
+/// One spot ready for tracing: its lens points and the triangles that can shadow its pool.
+struct SpotTrace {
+    spot: Spot,
+    lens: [V3; LENS],
+    cos_in: f64,
+    cos_out: f64,
+    /// Candidate occluders: (triangle index, its bounding box).
+    tris: Vec<(u32, [V3; 2])>,
+}
+
+impl SpotTrace {
+    fn new(mesh: &Mesh, spot: Spot) -> SpotTrace {
+        let d = normalize(spot.dir);
+        let up = if d[2].abs() < 0.9 { [0.0, 0.0, 1.0] } else { [1.0, 0.0, 0.0] };
+        let (e1, e2) = (normalize(cross(up, d)), cross(d, normalize(cross(up, d))));
+        let mut lens = [spot.pos; LENS];
+        for (k, l) in lens.iter_mut().enumerate().skip(1) {
+            let a = k as f64 / (LENS - 1) as f64 * std::f64::consts::TAU;
+            let r = spot.radius * if k % 2 == 0 { 1.0 } else { 0.6 };
+            for i in 0..3 {
+                l[i] = spot.pos[i] + (a.cos() * e1[i] + a.sin() * e2[i]) * r;
+            }
+        }
+        // The pool's footprint on the ground plane: the outer cone's edge rays down to z 0.
+        let (mut lo, mut hi) = ([spot.pos[0], spot.pos[1]], [spot.pos[0], spot.pos[1]]);
+        let (so, co) = spot.outer.sin_cos();
+        for k in 0..32 {
+            let a = k as f64 / 32.0 * std::f64::consts::TAU;
+            let r = [d[0] * co + (a.cos() * e1[0] + a.sin() * e2[0]) * so, d[1] * co + (a.cos() * e1[1] + a.sin() * e2[1]) * so, d[2] * co + (a.cos() * e1[2] + a.sin() * e2[2]) * so];
+            let t = if r[2] < -1e-3 { (spot.pos[2] / -r[2]).min(400.0) } else { 400.0 };
+            for i in 0..2 {
+                let v = spot.pos[i] + r[i] * t;
+                lo[i] = lo[i].min(v);
+                hi[i] = hi[i].max(v);
+            }
+        }
+        let tris = mesh
+            .tris
+            .iter()
+            .enumerate()
+            .filter_map(|(ti, t)| {
+                let v = [mesh.verts[t[0] as usize], mesh.verts[t[1] as usize], mesh.verts[t[2] as usize]];
+                let bmin = [v[0][0].min(v[1][0]).min(v[2][0]), v[0][1].min(v[1][1]).min(v[2][1]), v[0][2].min(v[1][2]).min(v[2][2])];
+                let bmax = [v[0][0].max(v[1][0]).max(v[2][0]), v[0][1].max(v[1][1]).max(v[2][1]), v[0][2].max(v[1][2]).max(v[2][2])];
+                let inside = bmax[0] >= lo[0] - 2.0 && bmin[0] <= hi[0] + 2.0 && bmax[1] >= lo[1] - 2.0 && bmin[1] <= hi[1] + 2.0;
+                inside.then_some((ti as u32, [bmin, bmax]))
+            })
+            .collect();
+        SpotTrace { spot, lens, cos_in: spot.inner.cos(), cos_out: spot.outer.cos(), tris }
+    }
+
+    /// Cone × facing at world point `p` on a face with normal `n` (0..1, no shadow).
+    fn reach(&self, p: V3, n: V3) -> f64 {
+        let v = sub(p, self.spot.pos);
+        let len = dot(v, v).sqrt();
+        if len < 1e-6 {
+            return 0.0;
+        }
+        let v = [v[0] / len, v[1] / len, v[2] / len];
+        let c = dot(v, normalize(self.spot.dir));
+        if c <= self.cos_out {
+            return 0.0;
+        }
+        let t = ((c - self.cos_out) / (self.cos_in - self.cos_out)).clamp(0.0, 1.0);
+        let cone = t * t * (3.0 - 2.0 * t);
+        let facing = (-dot(n, v)).max(0.0);
+        cone * (0.3 + 0.7 * facing) * self.spot.strength
+    }
+
+    /// The share of the lens that `p` (on triangle `own`, normal `n`) sees.
+    fn visible(&self, mesh: &Mesh, p: V3, n: V3, own: u32) -> f64 {
+        let o = [p[0] + n[0] * 0.05, p[1] + n[1] * 0.05, p[2] + n[2] * 0.05];
+        let mut seen = 0;
+        for l in &self.lens {
+            let d = sub(*l, o);
+            let (bmin, bmax) = ([o[0].min(l[0]), o[1].min(l[1]), o[2].min(l[2])], [o[0].max(l[0]), o[1].max(l[1]), o[2].max(l[2])]);
+            let blocked = self.tris.iter().any(|&(ti, [tmin, tmax])| {
+                ti != own
+                    && tmax[0] >= bmin[0]
+                    && tmin[0] <= bmax[0]
+                    && tmax[1] >= bmin[1]
+                    && tmin[1] <= bmax[1]
+                    && tmax[2] >= bmin[2]
+                    && tmin[2] <= bmax[2]
+                    && segment_hits(mesh, ti, o, d)
+            });
+            if !blocked {
+                seen += 1;
+            }
+        }
+        seen as f64 / LENS as f64
+    }
+}
+
+/// Möller–Trumbore: does the segment `o` → `o + d` cross triangle `ti` (strictly between its ends)?
+fn segment_hits(mesh: &Mesh, ti: u32, o: V3, d: V3) -> bool {
+    let t = mesh.tris[ti as usize];
+    let (a, b, c) = (mesh.verts[t[0] as usize], mesh.verts[t[1] as usize], mesh.verts[t[2] as usize]);
+    let (e1, e2) = (sub(b, a), sub(c, a));
+    let pv = cross(d, e2);
+    let det = dot(e1, pv);
+    if det.abs() < 1e-12 {
+        return false;
+    }
+    let inv = 1.0 / det;
+    let tv = sub(o, a);
+    let u = dot(tv, pv) * inv;
+    if !(0.0..=1.0).contains(&u) {
+        return false;
+    }
+    let qv = cross(tv, e1);
+    let v = dot(d, qv) * inv;
+    if v < 0.0 || u + v > 1.0 {
+        return false;
+    }
+    let s = dot(e2, qv) * inv;
+    s > 1e-4 && s < 1.0 - 1e-4
+}
+
+/// [`render_scene`] with spotlights: each pixel the spots reach is lifted along `ramp` (void, dark, light
+/// codes; half steps 0..4) by their summed light, which is traced per sample (cone, facing) and per pixel
+/// (shadow, over the lens). Codes outside the ramp (the Lattice's `hot`) stay as they are.
+pub fn render_scene_lit(mesh: &Mesh, view: View, light: &Light, shadows: &ShadowMap, spots: &[Spot], ramp: [u8; 3]) -> SpriteImage {
+    let traces: Vec<SpotTrace> = spots.iter().map(|&s| SpotTrace::new(mesh, s)).collect();
     let (w, h) = (view.w as usize, view.h as usize);
     let (sw, sh) = (w * SS, h * SS);
     let mut depth = vec![f64::NEG_INFINITY; sw * sh];
@@ -546,7 +690,34 @@ pub fn render_scene(mesh: &Mesh, view: View, light: &Light, shadows: &ShadowMap)
             let p = [(x * 2) as f64 + 1.0 - view.cx, view.cy - y as f64 - 0.5, z];
             let m = &mesh.materials[mesh.mats[best as usize] as usize];
             let n = normals[best as usize];
-            let (ca, cb) = shade_lit(m, n, light, shadows.shadowed_at(p, n));
+            let (mut ca, mut cb) = shade_lit(m, n, light, shadows.shadowed_at(p, n));
+            if !traces.is_empty() {
+                let level = |c: u8| ramp.iter().position(|&r| r == c);
+                if let (Some(la), Some(lb)) = (level(ca), level(cb)) {
+                    // Cone and facing over this face's samples (smooth pool edges), the shadow once.
+                    let mut lift = 0.0;
+                    for tr in &traces {
+                        let (mut sum, mut k) = (0.0, 0);
+                        for j in 0..SS {
+                            for i in 0..SS {
+                                let si = (y * SS + j) * sw + x * SS + i;
+                                if face[si] != best {
+                                    continue;
+                                }
+                                let q = [(x * 2) as f64 + (i as f64 + 0.5) * 2.0 / SS as f64 - view.cx, view.cy - y as f64 - (j as f64 + 0.5) / SS as f64, depth[si]];
+                                sum += tr.reach(q, n);
+                                k += 1;
+                            }
+                        }
+                        let reach = sum / k.max(1) as f64;
+                        if reach > 0.02 {
+                            lift += reach * tr.visible(mesh, p, n, best);
+                        }
+                    }
+                    let q = ((la + lb) as f64 + (lift * 3.0).round()).min(4.0) as usize;
+                    (ca, cb) = (ramp[q / 2], ramp[q.div_ceil(2)]);
+                }
+            }
             img.set(x as u16, y as u16, Some(if (x + y) & 1 == 0 { ca } else { cb }));
         }
     }

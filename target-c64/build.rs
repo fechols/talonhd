@@ -4,7 +4,12 @@ fn main() {
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let compiler = env::var("MOS_CLANG").unwrap_or_else(|_| "mos-c64-clang".into());
-    for name in ["startup", "reu", "blit", "hud", "digital"] {
+    let mut sources = vec!["startup", "reu", "blit", "hud", "digital"];
+    // Unit-cost microbenchmarks (feature `bench`).
+    if env::var_os("CARGO_FEATURE_BENCH").is_some() {
+        sources.push("bench");
+    }
+    for name in sources {
         let source = root.join(format!("asm/{name}.S"));
         println!("cargo:rerun-if-changed={}", source.display());
         let object = out.join(format!("{name}.o"));

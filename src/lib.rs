@@ -10,6 +10,7 @@
 
 #![cfg_attr(not(feature = "host"), no_std)]
 
+pub mod ace;
 pub mod audio;
 pub mod boss;
 pub mod demo;

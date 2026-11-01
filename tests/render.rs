@@ -234,3 +234,28 @@ fn image_verification_and_invalidation() {
     render::invalidate_image(&mut m);
     assert!(render::read_image(&mut m).is_none());
 }
+
+#[test]
+fn animated_levels_pick_a_frame_by_tick() {
+    let mut rng = Rng(4242);
+    let mut panos: Vec<Panorama> = (0..4).map(|_| panorama(&mut rng, 30)).collect();
+    let pal = panos[0].palette;
+    for p in panos.iter_mut() {
+        p.palette = pal;
+    }
+    let frames = vec![sprite(&mut rng, 32, 32)];
+    let image = bake::build_animated_level(&panos, 2, &frames, 0, &[], &[]).unwrap();
+    let mut m = Machine::new(&image);
+    let img = render::read_image(&mut m).expect("header");
+    assert!(render::verify_image(&mut m, &img));
+    assert_eq!((img.bg_mask, img.bg_shift), (3, 2));
+    let addrs: Vec<u32> = (0..4u8).map(|k| render::background_at(&mut m, &img, 4 * k)).collect();
+    assert_eq!(addrs[0], img.background);
+    for (k, &a) in addrs.iter().enumerate() {
+        let rows = panos[k].bitmap_rows();
+        assert_eq!(&image[a as usize..a as usize + rows.len()], &rows[..], "frame {k}");
+        // Each frame is held for 4 ticks, and the loop repeats.
+        assert_eq!(render::background_at(&mut m, &img, 4 * k as u8 + 3), a);
+        assert_eq!(render::background_at(&mut m, &img, 4 * k as u8 + 16), a);
+    }
+}

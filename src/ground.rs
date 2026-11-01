@@ -293,9 +293,10 @@ impl Ground {
         Ground { units: [NO_UNIT; UNITS], next: 0, next_at: 0, last: 0, live: 0 }
     }
 
-    /// Whether the step has work at stage line `at` (resident: decides the paging).
+    /// Whether the step has work at stage line `at` (resident: decides the paging). Pure and called only
+    /// from the step (I/O banked out), so it lives in the RAM under the I/O chips.
     #[inline(never)]
-    #[cfg_attr(target_arch = "mos", unsafe(link_section = ".text.resident.ground_busy"))]
+    #[cfg_attr(target_arch = "mos", unsafe(link_section = ".iotext.ground_busy"))]
     pub fn busy(&self, at: u16) -> bool {
         self.live != 0 || at >= self.next_at || at < self.last
     }

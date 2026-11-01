@@ -49,6 +49,7 @@ class C64(Cpu):
         self.reu = reu
         self.dmas = collections.deque(maxlen=40)
         self.flips = 0
+        self.stack_low = 0xD000
         self.alarm = None
         self.one_shot_end = None
         self.play_start = None
@@ -95,6 +96,9 @@ class C64(Cpu):
             if a == 0xDF20:
                 self.sampler_gate(v)
             return
+        if 0xCE30 <= a < 0xD000 and a < self.stack_low:
+            # The soft stack's high-water mark (it grows down from $D000 toward the HUD table).
+            self.stack_low = a
         self.mem[a] = v
 
     def sampler_gate(self, v):
@@ -194,8 +198,9 @@ def main():
     image = Path(args.reu).read_bytes()
     cpu = C64(ram, reu)
     # The PRG waits for the image after erasing its magic: install it once the erase has happened.
-    erase = next(v for k, v in syms.items() if 'read_image' in k)  # install on the first header read, after the erase
-    verify = next(v for k, v in syms.items() if 'verify_image' in k)
+    # Install on the first header read, after the erase (the `bench` build has none).
+    erase = next((v for k, v in syms.items() if 'read_image' in k), -1)
+    verify = next((v for k, v in syms.items() if 'verify_image' in k), -1)
     installed = False
     cpu.pc = syms['_start']
     last = collections.deque(maxlen=args.trace)
@@ -229,6 +234,8 @@ def main():
             break
     else:
         print(f'ran {cpu.flips} flips, {steps} instructions, no fault')
+        print(f'soft stack: deepest write ${cpu.stack_low:04x} ({0xD000 - cpu.stack_low} bytes below $D000, '
+              f'limit 464: the static frames end at $CE30)')
         check_music(cpu, reu)
         return
     print('last instructions:')

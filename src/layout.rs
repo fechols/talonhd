@@ -47,15 +47,11 @@ pub const VISIBLE: i16 = 192;
 /// Per-column segment list for the column being drawn (≤ 512 × 4 bytes).
 pub const SEG_BUF: u16 = 0xC000;
 pub const SEG_BUF_LEN: u16 = 0x0800;
-/// Column job block read by the `draw_column` kernel (see [`job`]).
+/// Job block read by the sprite kernel `draw_cols` (see [`job`]).
 pub const JOB: u16 = 0xCA00;
 /// 64-byte bounce buffer for header/frame/phase records fetched from the REU.
 pub const RECORD: u16 = 0xCA20;
 pub const RECORD_LEN: u16 = 0x0040;
-/// Column table for the visible columns of the current sprite (≤ 129 × 8).
-/// (gclass had it at `$8000`; TALON HD keeps `$8000-$8BFF` for HUD sprites.)
-pub const COL_TABLE: u16 = 0xE000;
-pub const COL_TABLE_LEN: u16 = 0x0410;
 /// The two VIC banks.
 pub const VIC_BANK: [u16; 2] = [0x4000, 0x8000];
 /// HUD sprite blocks: 48 × 64 bytes in each bank, same contents.
@@ -78,7 +74,7 @@ pub const COLOR_RAM: u16 = 0xD800;
 
 /// Offsets inside the [`JOB`] block. All values little-endian.
 pub mod job {
-    /// u16: back-buffer address of this column's top cell (bitmap + col*8).
+    /// u16: back-buffer address of the first column's top cell (bitmap + col*8).
     pub const DST: u16 = 0;
     /// i16: screen y of sprite line 0.
     pub const Y: u16 = 2;
@@ -86,11 +82,24 @@ pub mod job {
     pub const TOP: u16 = 4;
     /// u16: end (exclusive) of visible sprite lines.
     pub const BOT: u16 = 6;
-    /// u24: REU address of this column's pixel bytes (line 0).
-    pub const DATA: u16 = 8;
-    /// u16: number of 4-byte segments in [`super::SEG_BUF`].
-    pub const COUNT: u16 = 11;
+    /// u16: RAM address of the first column record.
+    pub const SRC: u16 = 8;
+    /// u8: column records to draw (consecutive, each 8 bytes right of the last).
+    pub const NCOLS: u16 = 10;
 }
+
+/// The sprite renderer's RAM: band data fetched per chunk into the segment buffer (sharing its bytes
+/// with the music's staging and the attract pilot's Mind, which are not live while rendering), one band's
+/// column offsets after it, and the small-sprite cache where the old column table was ($E000-$E40F, RAM
+/// under the KERNAL ROM; persists across frames, nothing else writes it after boot).
+pub const CHUNK: u16 = SEG_BUF;
+pub const CHUNK_LEN: u16 = 0x0700;
+pub const OFFS: u16 = SEG_BUF + 0x0700;
+pub const SPRITE_CACHE: u16 = 0xE000;
+/// A power of two (the slot is picked with a mask).
+pub const SPRITE_CACHE_SLOTS: u16 = 8;
+pub const SPRITE_CACHE_SLOT: u16 = 0x82;
+const _: () = assert!(SPRITE_CACHE_SLOTS.is_power_of_two() && SPRITE_CACHE_SLOTS * SPRITE_CACHE_SLOT <= 0x0410);
 
 /// Offsets inside the [`STATUS`] block.
 pub mod status {
@@ -108,6 +117,11 @@ pub mod status {
     pub const HOLD: u16 = 8;
     /// u16: microseconds of RENDER_US spent restoring the background.
     pub const BACKGROUND_US: u16 = 10;
+    /// u16 (feature `timing`): microseconds of the last frame's music service (AUDIO paging + decode).
+    pub const AUDIO_US: u16 = 12;
+    /// u16 (feature `timing`): microseconds of the last game step (input, the attract pilot, the sim, the
+    /// boss/midboss/ground steps, all their paging).
+    pub const STEP_US: u16 = 14;
     /// 3 × u16 (feature `profile`): sprite time in setup / column overhead /
     /// column kernel, in µs.
     pub const PROFILE_US: u16 = 16;

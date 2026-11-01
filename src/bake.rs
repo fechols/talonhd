@@ -3,7 +3,7 @@
 //! (`a5775bf`); the panorama is vertical and all colors are global.
 
 use crate::encode::{self, SpriteImage};
-use crate::format::{self, column, frame, header, phase};
+use crate::format::{self, frame, header, phase};
 use crate::palette::PALETTE;
 use crate::render::Palette;
 
@@ -75,13 +75,32 @@ pub fn build_image(pano: &Panorama, frames: &[SpriteImage], border: u8) -> Resul
 /// Build one level's REU image with its stage music (a DLT5 asset, `crate::audio`; empty = none) and
 /// the C64 build's paged code phases (`paging::NAMES` order, `dist/phases`; empty = none).
 pub fn build_level(pano: &Panorama, frames: &[SpriteImage], border: u8, music: &[u8], phases: &[Vec<u8>]) -> Result<Vec<u8>, String> {
+    build_animated_level(std::slice::from_ref(pano), 0, frames, border, music, phases)
+}
+
+/// [`build_level`] for an animated level: `panos` is its loop of whole panorama frames (a power of two of
+/// them, all the same size and palette), each shown `1 << shift` ticks.
+pub fn build_animated_level(panos: &[Panorama], shift: u8, frames: &[SpriteImage], border: u8, music: &[u8], phases: &[Vec<u8>]) -> Result<Vec<u8>, String> {
     assert!(frames.len() <= u16::MAX as usize);
+    let pano = &panos[0];
     assert!(pano.rows >= 25, "panorama needs at least 25 cell rows");
+    assert!(panos.len().is_power_of_two() && panos.len() <= 256, "panorama frames must be a power of two");
+    assert!(panos.iter().all(|p| p.rows == pano.rows && p.palette == pano.palette), "panorama frames differ in size or palette");
+    assert!(((panos.len() - 1) << shift) <= 255, "the animation loop must fit the tick's low byte");
     let mut a = Alloc { image: vec![0; format::HEADER_LEN as usize] };
     a.image[..8].copy_from_slice(&format::MAGIC);
 
-    // The window DMA (`hw::fetch`) splits at banks, so the panorama may span them.
-    let bg_addr = a.place(&pano.bitmap_rows())?;
+    // The frame table first (at `format::BG_TABLE`), then the frames. The window DMA (`hw::fetch`)
+    // splits at banks, so a panorama may span them.
+    let table = a.reserve(4 * panos.len())?;
+    debug_assert_eq!(table, format::BG_TABLE);
+    for (k, p) in panos.iter().enumerate() {
+        let at = a.place(&p.bitmap_rows())?;
+        a.put_u32(table + 4 * k as u32, at);
+    }
+    let bg_addr = a.image[table as usize..table as usize + 4].try_into().map(u32::from_le_bytes).unwrap();
+    a.image[header::BG_MASK] = (panos.len() - 1) as u8;
+    a.image[header::BG_SHIFT] = shift;
 
     let hud: Vec<u8> = crate::hud::static_blocks().iter().flatten().copied().collect();
     let hud_addr = a.place(&hud)?;
@@ -92,28 +111,19 @@ pub fn build_level(pano: &Panorama, frames: &[SpriteImage], border: u8, music: &
         let rec = dir + i as u32 * format::FRAME_RECORD;
         a.put_u16(rec + frame::W as u32, img.w);
         a.put_u16(rec + frame::H as u32, img.h);
+        let (shift, nbands) = encode::bands(img.h);
         a.image[(rec + frame::PHASE_COUNT as u32) as usize] = img.phases;
+        a.image[(rec + frame::BAND_SHIFT as u32) as usize] = shift;
+        a.image[(rec + frame::BANDS as u32) as usize] = nbands as u8;
         for p in 0..img.phases as u16 {
-            let enc = encode::encode_phase(img, p);
+            let block = encode::encode_block(img, p);
+            // The C64 fetches a band's on-screen columns into CHUNK, one or more columns at a time.
+            let at = a.place(&block.bytes)?;
             let prec = rec + frame::PHASES as u32 + p as u32 * frame::PHASE_LEN as u32;
-            a.image[(prec + phase::WB as u32) as usize] = enc.wb as u8;
-            let table = a.reserve(enc.wb as usize * format::COLUMN_ENTRY as usize)?;
-            a.put_u32(prec + phase::COLUMNS as u32, table);
-            for (j, col) in enc.columns.iter().enumerate() {
-                let e = table + j as u32 * format::COLUMN_ENTRY as u32;
-                if col.segments.is_empty() {
-                    continue;
-                }
-                let segs: Vec<u8> = col.segments.iter().flatten().copied().collect();
-                let seg_addr = a.place(&segs)?;
-                // Only run bytes are stored (gaps are Skip segments); bias the
-                // address by the first run's line so `data + line` works.
-                let data_addr = if col.data.is_empty() { 0 } else { a.place(&col.data)?.wrapping_sub(col.first as u32) };
-                let entry = &mut a.image[e as usize..e as usize + 8];
-                entry[column::DATA..column::DATA + 3].copy_from_slice(&data_addr.to_le_bytes()[..3]);
-                entry[column::SEGS..column::SEGS + 3].copy_from_slice(&seg_addr.to_le_bytes()[..3]);
-                entry[column::COUNT..column::COUNT + 2].copy_from_slice(&(col.segments.len() as u16).to_le_bytes());
-            }
+            a.image[(prec + phase::WB as u32) as usize] = block.wb as u8;
+            a.image[(prec + phase::BLOCK as u32) as usize..(prec + phase::BLOCK as u32 + 3) as usize]
+                .copy_from_slice(&at.to_le_bytes()[..3]);
+            a.put_u16(prec + phase::LEN as u32, block.bytes.len().min(0xFFFF) as u16);
         }
     }
 
@@ -138,7 +148,7 @@ pub fn build_level(pano: &Panorama, frames: &[SpriteImage], border: u8, music: &
                 return Err(format!("phase {} is {} bytes (> {slot})", crate::paging::NAMES[id], img.len()));
             }
             blob[id * slot..id * slot + img.len()].copy_from_slice(img);
-            a.put_u16((header::PHASE_LENS + 2 * id) as u32, img.len() as u16);
+            a.image[header::PHASE_LENS + id] = img.len().div_ceil(256) as u8;
         }
         let refs: Vec<&[u8]> = phases.iter().map(|v| v.as_slice()).collect();
         a.put_u16(header::PHASE_STAMP as u32, crate::paging::stamp(&refs));
@@ -146,6 +156,11 @@ pub fn build_level(pano: &Panorama, frames: &[SpriteImage], border: u8, music: &
     };
 
     let size = a.image.len() as u32;
+    // The attract pilot's scratch, the music ring and the phase bank sit at the top of the REU
+    // (`ace::MIND_REU`, `audio::RING`, `paging`).
+    if size > crate::ace::MIND_REU {
+        return Err(format!("level image is {size} bytes: it would run into the REU scratch at {:#x}", crate::ace::MIND_REU));
+    }
     a.put_u32(header::SIZE as u32, size);
     a.put_u32(header::BACKGROUND as u32, bg_addr);
     a.image[header::D021] = pano.palette.d021;
@@ -185,11 +200,7 @@ pub fn sprite_preview(img: &SpriteImage, pal: Palette) -> Vec<[u8; 3]> {
 pub fn frame_bytes(img: &SpriteImage) -> usize {
     let mut n = format::FRAME_RECORD as usize;
     for p in 0..img.phases as u16 {
-        let enc = encode::encode_phase(img, p);
-        n += enc.wb as usize * format::COLUMN_ENTRY as usize;
-        for col in &enc.columns {
-            n += col.segments.len() * 4 + col.data.len();
-        }
+        n += encode::encode_block(img, p).bytes.len();
     }
     n
 }

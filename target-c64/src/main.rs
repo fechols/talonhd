@@ -2,7 +2,7 @@
 //! 3D-rendered software sprites over the scrolling S1 panorama, all pixels DMA'd by the REU into a
 //! double-buffered 160×200 multicolor bitmap. (Main loop vendored from gclass `a5775bf`.)
 //!
-//! Attract mode: the sim's autopilot flies until the joystick (port 2) or SPACE is touched; from then on
+//! Attract mode: ACE (`talonhd::ace`, a GOAP pilot) flies until the joystick (port 2) or SPACE is touched; from then on
 //! the player does, until GAME OVER hands the stick back. While the autopilot flies, every frame is a pure
 //! function of the tick count, so `talonhd compare` replays it on the host and checks digest and pixels.
 //!
@@ -26,7 +26,9 @@ unsafe extern "C" {
     fn hud_irq();
     fn hud_irq_enable();
     #[cfg(not(feature = "rust-columns"))]
-    fn draw_column_asm();
+    fn draw_cols_asm();
+    /// `asm/blit.S`: one sprite (the `SP_*` block at `SPRITE_JOB`); `render::draw_sprite` is its reference.
+    fn draw_sprite_asm();
 }
 
 struct C64;
@@ -59,8 +61,8 @@ impl Hw for C64 {
     }
     #[cfg(not(feature = "rust-columns"))]
     #[inline(always)]
-    fn draw_column(&mut self) {
-        unsafe { draw_column_asm() }
+    fn draw_cols(&mut self) {
+        unsafe { draw_cols_asm() }
     }
     #[inline(always)]
     fn fill(&mut self, addr: u16, len: u16, value: u8) {
@@ -85,6 +87,13 @@ fn raster(c: &mut C64) -> u16 {
             return lo as u16 | (hi as u16) << 1;
         }
     }
+}
+
+#[cfg(feature = "bench")]
+unsafe extern "C" {
+    /// `asm/bench.S`: time the renderer's primitives on this machine (u16 microseconds per test at `$CA60`,
+    /// `$BE` at `$CA7E` when done). In the BOOT phase (run once); the game then carries on.
+    fn bench_all();
 }
 
 /// CIA 2 timer A, free-running at the 1 MHz system clock (counts down).
@@ -115,7 +124,8 @@ unsafe extern "C" {
 /// The phase in the window (0xFF: none).
 static mut CURRENT_PHASE: u8 = 0xFF;
 /// Each phase's length (BOOT's from the PRG, the rest from the level image's header).
-static mut PHASE_LEN: [u16; paging::PHASES as usize] = [0; paging::PHASES as usize];
+/// Each phase's length in 256-byte pages (`format::header::PHASE_LENS`).
+static mut PHASE_LEN: [u8; paging::PHASES as usize] = [0; paging::PHASES as usize];
 /// The stamp of the phases this PRG was built with: `scripts/build-target.sh` patches it in after the
 /// link (`tools/phases.py`); the level image's header must carry the same (`install_phases`).
 #[unsafe(no_mangle)]
@@ -137,8 +147,9 @@ fn install_phases(c: &mut C64, img: &Image) {
         }
         let n = img.phase_lens[p as usize];
         let slot = p as u32 * paging::PHASE_SLOT;
-        talonhd::hw::fetch(c, img.phases + slot, 0xA000, n);
-        talonhd::hw::stash(c, 0xA000, paging::REU_PHASES + slot, n);
+        let len = (n as u16) << 8;
+        talonhd::hw::fetch(c, img.phases + slot, 0xA000, len);
+        talonhd::hw::stash(c, 0xA000, paging::REU_PHASES + slot, len);
         unsafe { PHASE_LEN[p as usize] = n };
     }
 }
@@ -156,8 +167,52 @@ pub extern "C" fn talonhd_page(p: u8) {
     }
     let port = c.peek(0x0001);
     c.poke(0x0001, 0x35);
-    let len = unsafe { PHASE_LEN[p as usize] };
+    let len = (unsafe { PHASE_LEN[p as usize] } as u16) << 8;
     talonhd::hw::fetch(c, paging::REU_PHASES + p as u32 * paging::PHASE_SLOT, paging::WINDOW, len);
+    c.poke(0x0001, port);
+}
+
+/// The sprite job block `draw_sprite_asm` reads (`asm/blit.S` `SP_*`).
+const SPRITE_JOB: u16 = 0xCAA0;
+
+/// One sprite through the assembler path (`render::draw_sprite` is the reference the host model runs).
+#[inline(never)]
+fn draw_sprite(c: &mut C64, img: &Image, buf: layout::Buffer, s: &render::Sprite, fine: u8) {
+    if s.frame >= img.frames {
+        return;
+    }
+    let y = s.y + fine as i16;
+    let job = [
+        s.frame as u8,
+        (s.frame >> 8) as u8,
+        s.x as u8,
+        (s.x >> 8) as u8,
+        y as u8,
+        (y >> 8) as u8,
+        buf.bitmap as u8,
+        (buf.bitmap >> 8) as u8,
+        img.directory as u8,
+        (img.directory >> 8) as u8,
+        (img.directory >> 16) as u8,
+    ];
+    for (i, &b) in job.iter().enumerate() {
+        c.poke(SPRITE_JOB + i as u16, b);
+    }
+    unsafe { draw_sprite_asm() }
+}
+
+/// Park (`stash`) or fetch the attract pilot's `Mind` (SEG_BUF <-> REU `ace::MIND_REU`). Called from the
+/// step, which runs with I/O banked out: bank it in for the REU registers, then restore.
+#[inline(never)]
+#[unsafe(link_section = ".uptext.mind_dma")]
+fn mind_dma(c: &mut C64, stash: bool) {
+    let port = c.peek(0x0001);
+    c.poke(0x0001, 0x35);
+    if stash {
+        talonhd::hw::stash(c, layout::SEG_BUF, talonhd::ace::MIND_REU, talonhd::ace::MIND_BYTES);
+    } else {
+        talonhd::hw::fetch(c, talonhd::ace::MIND_REU, layout::SEG_BUF, talonhd::ace::MIND_BYTES);
+    }
     c.poke(0x0001, port);
 }
 
@@ -196,7 +251,7 @@ pub extern "C" fn main() -> i16 {
     unsafe {
         let len = &raw const __phase_boot_size as u16;
         talonhd::hw::stash(c, &raw const __phase_boot_load_start as u16, paging::REU_PHASES + paging::BOOT as u32 * paging::PHASE_SLOT, len);
-        PHASE_LEN[paging::BOOT as usize] = len;
+        PHASE_LEN[paging::BOOT as usize] = len.div_ceil(256) as u8;
     }
     // Boot-only code (image checks, HUD setup) runs from the paging window.
     paging::page(paging::BOOT);
@@ -217,7 +272,7 @@ pub extern "C" fn main() -> i16 {
     if preloaded.is_none() {
         render::invalidate_image(c);
     }
-    let img: Image = if let Some(img) = preloaded { img } else { loop {
+    let mut img: Image = if let Some(img) = preloaded { img } else { loop {
         if let Some(img) = render::read_image(c) {
             if render::verify_image(c, &img) {
                 break img;
@@ -286,6 +341,14 @@ pub extern "C" fn main() -> i16 {
         talonhd::audio::tune::started(c, player);
     }
 
+    // Feature `bench`: the renderer's unit costs, measured after a full boot (HUD IRQ running, as in play).
+    #[cfg(feature = "bench")]
+    {
+        // The bench lives in the BOOT phase (run once).
+        paging::page(paging::BOOT);
+        unsafe { bench_all() };
+    }
+    render::reset_sprite_cache(c);
     let mut human = false;
     let mut shown_palette = img.palette;
     // Ever touched: from then on the frames are no longer the host's attract-mode replay.
@@ -299,6 +362,8 @@ pub extern "C" fn main() -> i16 {
         c.poke(0xD020, 2);
         let n = game::scene(g, sprites);
         let scroll = game::view(g, &img);
+        // The animated level's frame for this tick.
+        img.background = render::background_at(c, &img, g.ticks as u8);
         // render::render_frame, split so the background can be timed.
         render::restore_background(c, &img, buf, scroll);
         let bg = micros(c).wrapping_sub(start);
@@ -308,9 +373,7 @@ pub extern "C" fn main() -> i16 {
         }
         render::sort_by_z(&mut sprites[..n]);
         for s in sprites[..n].iter() {
-            let mut s = *s;
-            s.y += scroll.fine as i16;
-            render::draw_sprite(c, &img, buf, &s);
+            draw_sprite(c, &img, buf, s, scroll.fine);
         }
         status_poke16(c, status::BACKGROUND_US, bg);
         for i in 0..3 {
@@ -337,8 +400,15 @@ pub extern "C" fn main() -> i16 {
         flipped_at = micros(c);
         render::hud_update(c, &game::hud_state(g));
         // Keep the music ring ahead of the sampler (I/O is in; the AUDIO phase is paged every frame).
+        #[cfg(feature = "timing")]
+        let t_audio = micros(c);
         paging::page(paging::AUDIO);
         talonhd::audio::service(c, player);
+        #[cfg(feature = "timing")]
+        {
+            let d = micros(c).wrapping_sub(t_audio);
+            status_poke16(c, status::AUDIO_US, d);
+        }
         // The boss's phase 2 recolors `hot` (a color RAM fill), in step with the frame just shown.
         let pal = game::palette(g, img.palette);
         if pal != shown_palette {
@@ -352,6 +422,8 @@ pub extern "C" fn main() -> i16 {
         c.poke(layout::STATUS + status::MAGIC, layout::STATUS_MAGIC);
 
         back ^= 1;
+        #[cfg(feature = "timing")]
+        let t_step = micros(c);
         if c.peek(layout::STATUS + status::HOLD) == 0 {
             // One sim tick per displayed frame. The stick takes over from the autopilot when touched
             // and hands back at GAME OVER.
@@ -369,11 +441,37 @@ pub extern "C" fn main() -> i16 {
             let input = if human {
                 stick
             } else {
-                paging::page(paging::ATTRACT);
-                sim::replay::autopilot(&g.world)
+                // ACE, one slice (one overlay) a tick: see (ATTRACT), the lookahead (MOTOR), think
+                // (ACE). The Mind is worked on in SEG_BUF (the renderer's scratch, idle during the
+                // step) and parked in the REU between ticks.
+                // SAFETY: SEG_BUF is ours during the step; Mind holds plain integers.
+                let mind = unsafe { &mut *(layout::SEG_BUF as *mut talonhd::ace::Mind) };
+                let slice = g.ace.slice();
+                if slice != 0 {
+                    mind_dma(c, false);
+                }
+                let input = if slice == 0 {
+                    paging::page(paging::ATTRACT);
+                    talonhd::ace::see(g, mind)
+                } else if slice == 1 {
+                    paging::page(paging::MOTOR);
+                    talonhd::ace::motor(g, mind)
+                } else {
+                    paging::page(paging::ACE);
+                    talonhd::ace::think(g, mind)
+                };
+                if g.ace.slice() != 0 {
+                    mind_dma(c, true);
+                }
+                input
             };
             g.step(input);
             c.poke(0x0001, 0x35);
+        }
+        #[cfg(feature = "timing")]
+        {
+            let d = micros(c).wrapping_sub(t_step);
+            status_poke16(c, status::STEP_US, d);
         }
     }
 }

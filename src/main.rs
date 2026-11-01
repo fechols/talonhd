@@ -97,11 +97,33 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
     let previews = PathBuf::from("output");
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
 
-    let pano: Panorama = talonhd::s1::panorama();
-    let share = talonhd::s1::code_share(&pano);
+    let t0 = std::time::Instant::now();
+    let panos: Vec<Panorama> = talonhd::s1::panorama_frames();
+    println!("S1 animation: {} frames rendered in {:.1} s", panos.len(), t0.elapsed().as_secs_f64());
+    let pano = &panos[0];
+    let share = talonhd::s1::code_share(pano);
     println!("S1 panorama: void {:.0} %, dark {:.0} %, light {:.1} %, hot {:.1} %", share[0] * 100.0, share[1] * 100.0, share[2] * 100.0, share[3] * 100.0);
     let strip: Vec<[u8; 3]> = pano.codes.iter().map(|&c| talonhd::palette::PALETTE[pano.palette.color_of(c) as usize]).collect();
     png::save_wide(&Path::new("output/sheets").join("panorama.png"), 160, &strip)?;
+    // The loop for review: the same windows (breakers on the sea wall with its searchlights, an islet's
+    // surf, the open swells) through every frame, side by side, and each frame as its own picture.
+    let period = demo::PANO_PERIOD as usize;
+    for (name, line) in [("seawall", 9 * 200 - 50), ("islet", 900), ("swells", 400), ("runway", 3400 + 300), ("radar", 3400 + 820), ("wake", 130), ("meridian", 400), ("docks", 2300), ("buoy", 700), ("channel", 1960), ("pits", 3400 + 540)] {
+        let top = period - line - 100;
+        let (w, h) = (160usize, 160usize);
+        let n = panos.len();
+        let mut px = vec![[0u8; 3]; w * n * h];
+        for (k, p) in panos.iter().enumerate() {
+            for y in 0..h {
+                for x in 0..w {
+                    px[y * w * n + k * w + x] = talonhd::palette::PALETTE[p.palette.color_of(p.codes[(top + y) * 160 + x]) as usize];
+                }
+            }
+        }
+        png::save_wide(&previews.join(format!("sheets/anim_{name}.png")), w * n, &px)?;
+    }
+    let spec = format!("{} frames x {} ticks", panos.len(), 1 << talonhd::s1::ANIM_SHIFT);
+    println!("animation previews: output/sheets/anim_*.png ({spec})");
     let frames = models::demo_frames_with_assets();
     let pal = pano.palette;
     let groups = [
@@ -122,8 +144,8 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         ("wreck", demo::WRECK_FRAME, 1),
         ("hulk", demo::WRECK_FRAME + 1, 1),
     ];
-    let mut total = pano.rows as usize * 320;
-    println!("panorama: {} cell rows, {} bytes", pano.rows, total);
+    let mut total = pano.rows as usize * 320 * panos.len();
+    println!("panorama: {} cell rows, {} bytes x {} frames", pano.rows, pano.rows as usize * 320, panos.len());
     for (name, first, count) in groups {
         let set = &frames[first as usize..(first + count) as usize];
         let bytes: usize = set.iter().map(bake::frame_bytes).sum();
@@ -153,7 +175,7 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         println!("phases: dist/phases incomplete (build the C64 program first); the image has none");
         Vec::new()
     };
-    let image = bake::build_level(&pano, &frames, 0, &music, &phases)?;
+    let image = bake::build_animated_level(&panos, talonhd::s1::ANIM_SHIFT, &frames, 0, &music, &phases)?;
     println!("level image: {} bytes of 16 MiB ({:.1} %), art ~{total} bytes", image.len(), image.len() as f64 * 100.0 / 16777216.0);
     write(&out.join("talonhd.reu"), &image)?;
     write(&out.join("talonhd.cfg"), include_bytes!("../config/talonhd.cfg"))?;
@@ -163,13 +185,15 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
     let img = render::read_image(&mut m).unwrap();
     // Attract-mode ticks: the first frames, WASP strings, a GANNET's dive and bombs, the docks, the boss.
     let mut g = game::Game::new();
+    let mut mind = talonhd::ace::Mind::new();
     // Then probed ticks: a camera shake (the TALON just hit), 200 ticks into the GANTRY QUEEN fight, and
     // phase 2 if the autopilot gets there.
     let mut ticks = vec![0u32, 1, 2, 3, 150, 450, 900, 1700, 3300, 3420, 5000, 7000];
     let mut probe = game::Game::new();
+    let mut probe_mind = talonhd::ace::Mind::new();
     let (mut shake, mut fight, mut phase2, mut keel) = (None, None, None, None);
     while probe.ticks < 40_000 && (shake.is_none() || keel.is_none()) {
-        let input = talonhd::sim::replay::autopilot(&probe.world);
+        let input = talonhd::ace::fly(&mut probe, &mut probe_mind);
         probe.step(input);
         if shake.is_none() && probe.pilot.since_hit == 3 {
             // The hit's first frames: +12 px (two whole columns right), then -8 (one column left).
@@ -191,14 +215,15 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
     println!("self-check ticks {ticks:?} (shake {shake:?}, keelbreaker {keel:?}, queen {fight:?}, phase 2 {phase2:?})");
     for t in ticks {
         while g.ticks < t {
-            let input = talonhd::sim::replay::autopilot(&g.world);
+            let input = talonhd::ace::fly(&mut g, &mut mind);
             g.step(input);
         }
         let buf = BUFFERS[(t & 1) as usize];
         let scroll = model::render_game(&mut m, &img, &g, buf);
         let mut sc = [render::Sprite::default(); game::INSTANCES];
         let n = game::scene(&g, &mut sc);
-        let mut want = reference::compose(&pano, &frames, scroll, &sc[..n]);
+        let k = ((t as u8) >> talonhd::s1::ANIM_SHIFT) as usize & (panos.len() - 1);
+        let mut want = reference::compose(&panos[k], &frames, scroll, &sc[..n]);
         want.color = vec![game::palette(&g, pano.palette).color; 1000];
         check(&m, buf, &want).map_err(|e| format!("t={t}: {e}"))?;
         png::save(&previews.join(format!("frames/t{t:04}.png")), 320, layout::VISIBLE as u32, &m.visible_with_hud(buf, img.palette.d021, scroll.fine))?;

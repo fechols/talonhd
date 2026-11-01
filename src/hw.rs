@@ -28,10 +28,9 @@ pub trait Hw {
     /// Write the REU command register, starting a DMA. Must be opaque to the
     /// optimizer on the C64: the DMA writes RAM behind the compiler's back.
     fn reu_exec(&mut self, command: u8);
-    /// Draw one column described by the [`crate::layout::JOB`] block from the
-    /// segments in [`crate::layout::SEG_BUF`].
-    fn draw_column(&mut self) {
-        crate::render::draw_column(self)
+    /// Draw the column records described by the [`crate::layout::JOB`] block (`render::draw_cols`).
+    fn draw_cols(&mut self) {
+        crate::render::draw_cols(self)
     }
     /// Store `value` into `len` bytes of RAM at `addr`.
     fn fill(&mut self, addr: u16, len: u16, value: u8) {

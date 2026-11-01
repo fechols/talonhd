@@ -21,6 +21,10 @@ rust-columns = []
 start-keel = []
 # Show render time as a border color bar.
 raster-bars = []
+# Time the frame's music service and game step into the status block (AUDIO_US, STEP_US).
+timing = []
+# Boot into the renderer's unit-cost microbenchmarks (results at $CA60; `tools/c64u.py bench`).
+bench = []
 # Time sprite setup / column overhead / column kernel into the status block
 # (costs a few CIA reads per column).
 profile = []

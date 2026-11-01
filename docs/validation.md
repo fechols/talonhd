@@ -349,3 +349,76 @@ User: levels as offline-rendered 3D geometry lit like the sprites, a time of day
   effect is awesome." Read back at tick 3512: render 6.1 ms, music running, fault 0, **0 underruns** after
   941,921 samples (~59 s), lead exactly 30,720 (ring - guard); calibration 785,201 CIA ticks per 12,288
   samples = a 16,005 Hz sampler (16 kHz streams: 0.03 % sharp).
+
+## Animated levels: S1 in 32 frames (2026-11-01)
+
+- Bake: 32 full 3D renders of S1 (`level_at(k/32)`, each with its own shadow map and traced spotlights) in
+  ~1.5 s on all cores; 216,000 B each. Level image 14,561,877 B (86.8 % of 16 MiB, under the music ring).
+  Background share unchanged (void 70 %, dark 29 %, light 0.9 %, hot 0.4 %). Model matches the reference
+  compositor at all self-check ticks (each composed against its own animation frame).
+- Host: 54 + 4 + 8 tests, incl. `the_animation_loops_without_a_seam` (frame 32 = frame 0 over the sea, the
+  sea wall and the airfield), `spotlights_light_and_shadow`, `animated_levels_pick_a_frame_by_tick`.
+- C64 build: stamp `12ba`; `check_phases.py` ok, `test_hud_irq.py` ok; emu64 75 flips, no fault, music
+  bit-exact, 0 underruns.
+- **C64U (192.168.66.178, `run` + `upload-reu`, 16.7 s upload):** running; `dump --hold` at tick 440
+  (animation frame 14): **0 mismatched bytes** vs the host model. Render 5.1-7.6 ms, background 2.7-2.9 ms
+  (unchanged: the frame pick is one 4-byte REU read).
+- More loops (same day): the wake streaming back, buoys bobbing in foam rings, crane booms swinging, the
+  Lattice veins creeping. `the_animation_loops_without_a_seam` now covers the wake, a buoy and the cranes.
+  Image size unchanged. **C64U:** `dump --hold` at tick 505 (frame 30): **0 mismatched bytes**; render
+  4.5 ms, background 2.6 ms.
+- More searchlights: crossing pairs on the channel quays (overlapping pools add up to white), one beside
+  each AA pit. Bake 2.9 s for 32 frames; light share 1.0 %. **C64U:** tick 363 (frame 26): **0 mismatched
+  bytes**; render 4.7 ms.
+- The MERIDIAN (level geometry at the head of her wake, u 262-542). **C64U:** tick 96, the opening screens:
+  **0 mismatched bytes**; render 4.2 ms.
+
+## ACE, the attract pilot (2026-11-01)
+
+- Host, 16,000 ticks from a new game: **ACE 0 deaths, KEELBREAKER sunk, GANTRY QUEEN beaten, 67,600
+  points, 105 kills** (an extend on the way); the vendored autopilot: 10 deaths, 3,100 points, 26 kills,
+  neither boss. 2.1 stick changes a second, no left-right flips. Bake self-check now reaches the
+  KEELBREAKER (5,234), the QUEEN (10,244) and her phase 2 (10,906): model = reference compositor.
+- C64: ACE in three phases (ATTRACT `see` 3,369 B, MOTOR 1,675 B, ACE `think` 2,637 B; 9 phases, stamp
+  `9283`); phase lengths now u8 page counts, stamp at header 34; `Ground::busy` moved under I/O to fit main
+  RAM. `check_phases.py` ok, `test_hud_irq.py` ok, emu64 76 flips no fault, music bit-exact.
+- **C64U:** 59.7 ticks/s (full NTSC rate) with three page-ins a tick; `dump --hold` at tick 1,947 and in
+  the KEELBREAKER fight at 5,736: **0 mismatched bytes** (the pilot decides identically on both machines);
+  render 6.2 / 8.5 ms.
+
+## Renderer unit costs on the C64U (2026-11-01, `bench` build)
+
+Measured at 64 MHz with the HUD raster IRQ running (`tools/c64u.py bench`; `asm/bench.S`, in the BOOT
+phase, runs once after boot):
+
+| primitive | cost |
+|---|---|
+| I/O register write (REU/VIC/CIA) | 1.26 us |
+| RAM store (`sta abs,x`) | 0.08 us |
+| RAM->RAM byte copy | 0.14 us |
+| blend (`lda (p),y / and / ora / sta`) | 0.27 us |
+| line-table address lookup | 0.34 us |
+| REU fetch, 1 / 8 / 64 / 512 B | 9.8 / 12.3 / 26.5 / 130.7 us (fixed ~9 us, then 0.25 us/B) |
+| chained 8-byte link (4 registers + command) | 7.1 us (0.88 us/B) |
+
+Consequences: an I/O write costs 16 RAM stores. Bulk-fetch a sprite's visible columns into RAM (one DMA)
+and scatter them with the CPU (~0.39 us/B) instead of chaining 8-byte DMAs per cell row (0.88 us/B plus
+a segment-list DMA and a job per column). Small sprites (bullets) should not touch the REU at all.
+
+## The assembler sprite path and the time-sliced ACE (2026-11-01)
+
+- New sprite format (banded column records, inline run bytes) and `draw_sprite_asm` / `draw_cols_asm`: CPU scatter
+  of bulk-fetched records, small sprites from a RAM cache at `$E000`. `test_blit.py` (400 random column sets) and
+  `test_sprite.py` (random frames/positions on the baked image, cache hits and misses) match the Rust reference;
+  bake self-check (both fights) model = reference with 1,314 DMA commands (was 2,342). Image 16.33 MB (the QUEEN's
+  band offset tables: +1.1 MB; to trim).
+- **C64U:** `compare` 0 mismatched bytes (ticks 92, 305). Full-stage log, the previous ACE (always firing):
+  frames over 16.7 ms flight 4.5% -> 0%, KEELBREAKER 63.8% -> 2.8%, QUEEN 50.2% -> 11.6%; sprite time p95 flight
+  7.4 -> 3.8 ms, KEELBREAKER 8.4 -> 4.8, QUEEN 14.6 -> 8.0; worst frame 26.9 -> 20.2 ms.
+- Bug found by the emulator: ACE `see` (ATTRACT phase) called a helper linked into the ACE phase; both share the
+  window's addresses, so the call ran ATTRACT's bytes and corrupted a callee-saved register (a BRK in
+  `hud_state`). `check_phases.py` now requires every call/jump inside a phase to land on that phase's own
+  function (or stay inside its own); the helper is called from `think` (ACE phase) instead.
+- ACE: fires only with an enemy on screen; keeps clear of live HATCHes (one launched a WASP under the parked
+  ship); predicts WASPs along their turn programs (two later-lap deaths were curving WASPs). 40,000 ticks: 0
+  deaths, 184,300 points.

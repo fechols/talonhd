@@ -83,6 +83,8 @@ pub struct Midboss {
     pub mines: [Mine; 2],
     /// Each turret's heading frame (16 yaws), aimed during the step so drawing only reads it.
     pub yaw: [u8; 3],
+    /// The playfield point to shoot now (`crate::ace`); y `boss::NO_AIM` when there is none.
+    pub aim: [i16; 2],
 }
 
 /// 48 directions, index 0 straight down the screen, rising toward +x, at 1.25 px/tick (Q6).
@@ -300,11 +302,15 @@ impl Midboss {
 
     #[inline(never)]
     fn take_hits(&mut self, w: &mut World) {
+        self.aim[1] = crate::boss::NO_AIM;
         for k in 0..3 {
             if self.hp[k] == 0 {
                 continue;
             }
             let c = deck(self, TURRET_DY[k]);
+            if self.aim[1] == crate::boss::NO_AIM {
+                self.aim = [c.0, c.1];
+            }
             let n = hits(w, c, (14, 14));
             if n != 0 {
                 self.hp[k] = self.hp[k].saturating_sub(n);
@@ -322,6 +328,7 @@ impl Midboss {
         }
         if self.state == PHASE2 {
             let c = deck(self, CORE_DY);
+            self.aim = [c.0, c.1];
             let n = hits(w, c, (24, 22));
             if n != 0 {
                 self.core = self.core.saturating_sub(n);

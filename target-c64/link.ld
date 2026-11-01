@@ -23,6 +23,11 @@ MEMORY {
      *   (the game step; the HUD IRQ banks I/O in for itself). */
     upram (rwx) : ORIGIN = 0x5C00, LENGTH = 0x0400
     ioram (rwx) : ORIGIN = 0xD000, LENGTH = 0x1000
+    /* llvm-mos's static stack (`.noinit`: the fixed frames of non-recursive functions), moved out of
+     * main RAM: after the HUD table ($CB00-$CB50), below the soft stack, which grows down from $D000 and
+     * measured 325 bytes deep (tools/emu64.py reports its high-water mark). Never loaded: the PRG's load
+     * images end far below. */
+    frames (rw) : ORIGIN = 0xCB60, LENGTH = 0x02D0
     /* Their load images, back to back right after the program in the PRG, from $4C00 up to at most $CFFF
      * (frame-buffer, HUD and window space, free until the first frame), followed by the BOOT phase's image, which main stashes
      * in the REU before anything overwrites them. The copies run in this order, and upram's destination
@@ -37,6 +42,8 @@ MEMORY {
     ph_ground (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
     ph_audio (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
     ph_tune (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
+    ph_ace (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
+    ph_motor (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
     /* Load addresses of every phase but BOOT: outside the PRG (OUTPUT_FORMAT writes ram and hiload
      * only). scripts/build-target.sh extracts them to dist/phases/<name>.bin; bake puts them in the
      * level REU image, and boot copies them to the phase bank (main.rs install_phases). */
@@ -55,6 +62,7 @@ SECTIONS {
     } >hiram AT>hiload
     .phase.boot : {
         *(.text._ZN11talonhd_c6414install_phases*)
+        *(.text.bench .rodata.bench_table)
         *(.text._ZN7talonhd4game4Game5reset*)
         *(.text._ZN7talonhd6render8hud_init* .text._ZN7talonhd6render10read_image* .text._ZN7talonhd6render12verify_image* .text._ZN7talonhd6render16invalidate_image*)
     } >ph_boot AT>hiload
@@ -69,11 +77,16 @@ SECTIONS {
         *(.lowbss .lowbss.*)
     } >lowram
     .uptext : {
+        *(.uptext .uptext.*)
         *(.text._ZN7talonhd3sim6common*)
         *(.text._ZN7talonhd3sim5world*)
         *(.text._ZN7talonhd2hw*)
     } >upram AT>hiload
+    .noinit (NOLOAD) : {
+        *(.noinit .noinit.* NULL INIT ZPSAVE)
+    } >frames
     .iotext : {
+        *(.iotext .iotext.*)
         *(.text._ZN7talonhd3sim7collide*)
         *(.text._ZN7talonhd3sim5gauge*)
     } >ioram AT>hiload
@@ -83,7 +96,17 @@ SECTIONS {
     } >ph_boss AT>phimg
     .phase.attract : {
         *(.text._ZN7talonhd3sim6replay*)
+        *(.text._ZN7talonhd3ace3see* .text._ZN7talonhd3ace6gather* .text._ZN7talonhd3ace3add* .text._ZN7talonhd3ace6choose* .text._ZN7talonhd3ace4rate*)
+        *(.rodata._ZN7talonhd3ace6choose*)
     } >ph_attract AT>phimg
+    .phase.motor : {
+        *(.text._ZN7talonhd3ace5motor* .text._ZN7talonhd3ace6assess*)
+        *(.rodata._ZN7talonhd3ace2MX* .rodata._ZN7talonhd3ace2MY*)
+    } >ph_motor AT>phimg
+    .phase.ace : {
+        *(.text._ZN7talonhd3ace*)
+        *(.rodata._ZN7talonhd3ace*)
+    } >ph_ace AT>phimg
     .phase.midboss : {
         *(.text._ZN7talonhd7midboss*)
         *(.rodata._ZN7talonhd7midboss*)
@@ -116,6 +139,9 @@ __uptext_pages = (SIZEOF(.uptext) + 255) / 256;
 __iotext_start = ADDR(.iotext);
 __iotext_load_start = LOADADDR(.iotext);
 __iotext_pages = (SIZEOF(.iotext) + 255) / 256;
+/* Boot copies .uptext ($5C00-$5FFF) before main stashes the BOOT phase from its load image: that image
+ * must lie above $6000 or the copy overwrites it (a build with little .iotext would move it down). */
+ASSERT(__phase_boot_load_start >= 0x6000, "BOOT phase load image under the .uptext copy: move it up")
 
 /* The SDK's charset switch (.init.250) calls KERNAL CHROUT, which is
  * unmapped by the time it runs (and $FFD2 now holds relocated code). */
