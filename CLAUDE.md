@@ -37,6 +37,7 @@ cargo test --release                     # renderer vs reference compositor, ras
 cargo check --no-default-features        # shared library still builds no_std
 cargo run --release -- bake              # dist/talonhd.reu + output/{sheets,frames}/*.png, self-checked
 cargo run --release -- preview --t 150   # one demo frame through the model
+cargo run --release --example queen_assembly   # output/lineup/queen.png: GANTRY QUEEN body + parts at 3 banks
 cargo run --release --example frame_stats -- dist/talonhd.reu 512   # DMAs / blends / I/O writes per frame
 ```
 
@@ -93,11 +94,18 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   void/dark/light at albedo ~0.6 with a solid-dark floor (no void checker over the sea); faceted tops.
 - **Sprite format:** column segments are Run, Mix or Skip (`SEG_SKIP`: subtract a gap from DATA, so holes cost no
   REU bytes). The Rust `draw_column`, `asm/blit.S` and `tools/test_blit.py` change together.
-- **Tech scene** (`src/demo.rs`, shared, integer-only; `src/models.rs`, host): S1 palette; the hand-built TALON and
-  GANTRY QUEEN (`assets/models/*.mesh`) when present, 49 roll frames, fine sine sway; procedural
-  stand-ins (not game content) for the drones, the panorama and, as a fallback, the boss.
+- **Tech scene** (`src/demo.rs`, shared, integer-only; `src/models.rs`, host): the S1 BREAKWATER panorama
+  (`src/s1.rs`: 26 screens, sea → sea wall → docks → airfield; ground void/dark only, flat concrete = 50 %
+  checker, open ground 25 %, `light` for surf and paint, `hot` for crystal cracks; `bake` writes
+  `output/sheets/panorama.png`); the hand-built TALON, WASPs and GANTRY QUEEN: body (49 roll frames) plus
+  two arms (5 aims) and four legs (6 strides) as separate sprites, each part with 7 coarse rolls, placed at the
+  body's rolled image of its origin (`demo::PART_XY0` + compile-time `PART_DX`; no trig on the C64).
+  Procedural stand-ins only as fallbacks.
+- **C64 code space is full** (`$0801-$4BFF`, ~13 bytes left after the GANTRY QUEEN parts): keep shared code
+  compact (`#[inline(never)]` helpers, compile-time tables, no 32-bit math). Next growth (the sim) needs the
+  free RAM at `$E410-$FFF9` (relocated at startup) or REU code paging as in TALON.
 - **Boot:** the PRG erases the REU magic, then waits for magic + whole-image checksum, so `run` then `upload-reu`
   always starts on the complete new image.
-- **Next:** a faceted CRAWLER top, the GANTRY QUEEN's separate leg/arm parts, the S1
-  panorama (sea, docks, airfield) in the S1 palette, then the TALON simulation.
+- **Next:** the TALON simulation port (`src/sim`) with S1's waves on the new panorama, which needs more code
+  space first.
 - **Hardware quirk:** `c64u.py run` right after `config` can reset the machine before the PRG loads; run again.

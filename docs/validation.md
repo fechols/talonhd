@@ -170,3 +170,24 @@ Every enemy is within the ≤ 15 % light rule.
   now `assets/models/hd.ship.talon.mesh` and the tech scene's player. Bake self-check: model matches the
   reference compositor; `talonhd.reu` `c093208f78bb704c…` (3.88 MB, 23.1 % of 16 MiB). Renderer and PRG
   unchanged, not re-run on the C64U.
+
+## 2026-11-01 — GANTRY QUEEN parts, CRAWLER roof, the S1 panorama
+
+Bible: S1 models rev 7.
+
+- **GANTRY QUEEN parts** (`hand::queen_parts`): the body (414 triangles, 49 rolls) loses its arms and legs to
+  separate sprites: 2 arms × 5 aims (±18° about the shoulder, toward the player) and 4 legs × 6 paddling
+  strides, each with 7 roll samples (8° apart). Canvases measured over every pose and roll: arms 112 × 240,
+  legs 168 × 232. The scene puts each part at the body's rolled image of its origin
+  (x' = x cos + z sin, Q14 Taylor in a `const` table); `examples/queen_assembly.rs` checks the fit at full
+  left, level and full right (`output/lineup/queen.png`).
+- **CRAWLER**: a hipped armour roof and bevelled track guards (72 triangles).
+- **S1 panorama** (`src/s1.rs`, 26 screens, 5200 lines, 675 cell rows): void 76 %, dark 23 %, light 0.8 %,
+  hot 0.4 % (`the_background_stays_down`: light ≤ 10 %, hot ≤ 3 %). The scene starts at the stage's
+  first screen and loops.
+- REU image `talonhd.reu` `9436e22699ec4491…`: 4.77 MB (28.5 % of 16 MiB): body 2.24 MB, arms 0.78 MB, legs
+  1.50 MB, panorama 216 KB. Self-check: model matches the reference compositor.
+- C64 code: the scene had grown to 5.2 KB (unrolled loops, 32-bit sine math) and overflowed `$4BFF` by 3 KB.
+  Now compact: compile-time part tables, `#[inline(never)]` helpers; 17,394 of 17,407 bytes used.
+- `test_blit.py` and `test_hud_irq.py` pass. C64U (PRG `9e11f916e34ac69c…`): held frame t=253, render
+  11.5 ms, background 2.7 ms → **0 mismatched bytes**.

@@ -7,7 +7,6 @@
 
 use std::f64::consts::PI;
 
-use crate::bake::Panorama;
 use crate::demo;
 use crate::encode::SpriteImage;
 use crate::raster3d::{self, Material, Mesh, Orient, View};
@@ -162,6 +161,21 @@ pub fn demo_frames_with_assets() -> Vec<SpriteImage> {
             frames[demo::BOSS_FRAME as usize + i] = f;
         }
     }
+    // Her arms and legs, when the body is hers: the files in `hand::queen_parts` order, each with its rolls.
+    if std::path::Path::new(QUEEN_MESH).exists() {
+        let mut at = demo::ARM_FRAME as usize;
+        for p in crate::hand::queen_parts() {
+            let path = format!("assets/models/{}.mesh", p.name);
+            let m = crate::mesh::load(std::path::Path::new(&path)).unwrap_or(p);
+            let rendered = m.render_all();
+            assert_eq!(rendered.len(), demo::PART_ROLLS as usize, "{}: part roll samples", m.name);
+            for f in rendered {
+                frames[at] = f;
+                at += 1;
+            }
+        }
+        assert_eq!(at, demo::DRONE_FRAME as usize);
+    }
     if let Ok(m) = crate::mesh::load(std::path::Path::new(WASP_MESH)) {
         // The hand-built WASP flies the drone paths: its 16 yaws, level (on the stand-in's canvas).
         let view = View::centered(demo::DRONE_W, demo::DRONE_H, 1.0);
@@ -189,6 +203,10 @@ pub fn demo_frames() -> Vec<SpriteImage> {
         // Nose down, toward the player; banking right dips the right wing.
         out.push(raster3d::render(&boss, Orient { yaw: PI, pitch: 0.0, roll }, view));
     }
+    // The stand-in boss has no separate parts: blank frames hold their slots.
+    for _ in demo::ARM_FRAME..demo::DRONE_FRAME {
+        out.push(SpriteImage::new(4, 1));
+    }
     let d = drone();
     let view = View::centered(demo::DRONE_W, demo::DRONE_H, 1.0);
     for i in 0..demo::DRONE_YAWS {
@@ -204,61 +222,3 @@ pub fn demo_frames() -> Vec<SpriteImage> {
     out
 }
 
-/// A ground structure for the panorama: a platform of stepped blocks.
-fn platform(seed: u32) -> Mesh {
-    // The background sits one step down: platforms are only ever the void/dark checker (or void), so
-    // solid dark always means the play layer.
-    let mut m = Mesh::new(vec![Material::lit(&[VOID, DARK], 0.42, 0), Material::lit(&[VOID, DARK], 0.6, 0)]);
-    let mut rng = seed;
-    let mut next = move || {
-        rng ^= rng << 13;
-        rng ^= rng >> 17;
-        rng ^= rng << 5;
-        rng
-    };
-    m.frustum([-120.0, -60.0, 0.0], [120.0, 60.0, 0.0], 8.0, 10.0, 0);
-    for _ in 0..7 {
-        let x = (next() % 200) as f64 - 100.0;
-        let y = (next() % 90) as f64 - 45.0;
-        let w = 8.0 + (next() % 22) as f64;
-        let h = 8.0 + (next() % 16) as f64;
-        let z = 14.0 + (next() % 20) as f64;
-        m.frustum([x - w, y - h, 10.0], [x + w, y + h, 10.0], 3.0, z, (next() % 2) as u8);
-    }
-    m
-}
-
-/// The tech-scene panorama: a starfield with platforms drifting far below,
-/// darker than the sprites (value-first: the play layer owns the contrast).
-pub fn demo_panorama() -> Panorama {
-    let period = demo::PANO_PERIOD as usize;
-    let mut codes = vec![VOID; 160 * period];
-    let mut rng = 0x2545_F491u32;
-    let mut next = move || {
-        rng ^= rng << 13;
-        rng ^= rng >> 17;
-        rng ^= rng << 5;
-        rng
-    };
-    for _ in 0..420 {
-        let (x, y) = ((next() % 160) as usize, (next() % period as u32) as usize);
-        codes[y * 160 + x] = if next() % 9 == 0 { LIGHT } else { DARK };
-    }
-    for (k, &(cx, cy)) in [(40i32, 120i32), (120, 380), (30, 640), (110, 880)].iter().enumerate() {
-        let view = View::centered(140, 140, 1.0);
-        let img = raster3d::render(&platform(k as u32 * 7919 + 1), Orient { yaw: k as f64 * 0.4, ..Orient::default() }, view);
-        for y in 0..img.h as i32 {
-            for x in 0..img.w as i32 {
-                let (px, py) = (cx + x - img.w as i32 / 2, cy + y - img.h as i32 / 2);
-                if let (Some(c), true) = (img.get(x as u16, y as u16), (0..160).contains(&px)) {
-                    codes[py.rem_euclid(period as i32) as usize * 160 + px as usize] = c;
-                }
-            }
-        }
-    }
-    // Append the first 200 lines so every 200-line window is contiguous.
-    let wrap = codes[..160 * 200].to_vec();
-    codes.extend_from_slice(&wrap);
-    let rows = ((period + 200) / 8) as u16;
-    Panorama { rows, codes, palette: DEMO_PALETTE }
-}

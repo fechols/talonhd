@@ -36,6 +36,7 @@ pub fn all() -> Vec<(String, ModelFile)> {
     for k in 0..HATCH_POSES {
         out.push((format!("enemy.common.hatch.open{k}"), hatch(k)));
     }
+    out.extend(queen_parts().into_iter().map(|m| (m.name.clone(), m)));
     out
 }
 
@@ -174,9 +175,17 @@ pub fn crawler() -> ModelFile {
     let mut m = Mesh::new(vec![hull(), hull_dark(), crystal(), weapon(), Material::glow(HOT)]);
     for s in [-1.0, 1.0] {
         let (a, b) = if s < 0.0 { (-19.0, -11.0) } else { (11.0, 19.0) };
-        m.cuboid([a, -22.0, 0.0], [b, 20.0, 8.0], 1);
+        // Bevelled track guards: the outer slopes catch (or lose) the light.
+        m.frustum([a, -22.0, 0.0], [b, 20.0, 0.0], 1.5, 8.0, 1);
     }
     m.frustum([-11.0, -20.0, 4.0], [11.0, 16.0, 4.0], 3.0, 13.0, 0);
+    // A hipped armour roof: two long slopes and two end facets instead of a flat top.
+    let (r0, r1) = ([0.0, -11.0, 17.0], [0.0, 7.0, 17.0]);
+    let (bl, br, fr, fl) = ([-8.0, -17.0, 13.0], [8.0, -17.0, 13.0], [8.0, 13.0, 13.0], [-8.0, 13.0, 13.0]);
+    m.poly(&[br, fr, r1, r0], 0);
+    m.poly(&[fl, bl, r0, r1], 0);
+    m.poly(&[bl, br, r0], 0);
+    m.poly(&[fr, fl, r1], 0);
     m.poly(&[[-8.0, 13.0, 13.0], [8.0, 13.0, 13.0], [11.0, 22.0, 5.0], [-11.0, 22.0, 5.0]], 0);
     m.sym(&[[8.0, 13.0, 13.0], [11.0, 16.0, 4.0], [11.0, 22.0, 5.0]], 0);
     m.tube([0.0, 14.0, 11.0], [0.0, 27.0, 11.0], 2.0, 6, 3, 4);
@@ -287,20 +296,7 @@ fn model(name: &str, canvas: (u16, u16), orient: &[(&str, f64)], mesh: Mesh) -> 
 /// legs with knee humps, wider than tall (the canvas is 1024 × 512 hires). The tower is short so a 24°
 /// bank tilts the crown without throwing it across the screen.
 pub fn gantry_queen() -> ModelFile {
-    const CONCRETE: u8 = 0;
-    const GLASS: u8 = 1;
-    const CRYSTAL: u8 = 2;
-    const HAZARD: u8 = 3;
-    const GLOW: u8 = 4;
-    const STEEL: u8 = 5;
-    let mut m = Mesh::new(vec![
-        Material::lit(&[VOID, DARK, LIGHT], 0.58, 1), // concrete: flat tops dark, light-facing slopes catch light
-        Material::lit(&[VOID, DARK, HOT], 0.5, 0),    // smoked glass: dark, glints hot toward the light
-        Material::lit(&[DARK, HOT], 1.0, 0),          // Lattice crystal
-        Material::lit(&[VOID, DARK, HOT], 0.72, 1),   // weapons: hazard-striped, hot
-        Material::glow(HOT),                          // muzzles, beacon
-        Material::lit(&[VOID, DARK, LIGHT], 0.5, 1),  // legs and struts
-    ]);
+    let mut m = queen_mesh();
     let oct = PI / 8.0; // octagons with flat sides facing the axes
 
     // Shaft, ribbed, mostly seen when banking.
@@ -360,35 +356,113 @@ pub fn gantry_queen() -> ModelFile {
         m.shard([200.0 * c, 200.0 * s, 170.0], [reach * c, reach * s, 205.0], 28.0, CRYSTAL);
     }
 
-    // Cannon arms: a beam out to each side, an elbow block, twin barrels pointing at the player (-y).
-    for sx in [-1.0, 1.0] {
-        m.beam([sx * 170.0, 0.0, 160.0], [sx * 400.0, -10.0, 150.0], 46.0, 34.0, HAZARD);
-        m.frustum([sx * 400.0 - 40.0, -50.0, 120.0], [sx * 400.0 + 40.0, 30.0, 120.0], 10.0, 176.0, STEEL);
-        for dx in [-18.0, 18.0] {
-            let x = sx * 400.0 + dx;
-            m.tube([x, -40.0, 160.0], [x, -210.0, 160.0], 11.0, 6, HAZARD, GLOW);
-        }
-        m.shard([sx * 300.0, -6.0, 172.0], [sx * 330.0, 40.0, 215.0], 20.0, CRYSTAL);
-    }
-
-    // Four legs splayed sideways: hip on the shaft, knee hump, foot pad; crystal plates on the knees.
-    for (ax, ay) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
-        let a: f64 = 0.50; // ~29° off the x axis
-        let dir = [ax * a.cos(), ay * a.sin()];
-        let at = |r: f64, z: f64| -> V3 { [dir[0] * r, dir[1] * r, z] };
-        m.beam(at(60.0, 20.0), at(300.0, 90.0), 44.0, 38.0, STEEL);
-        m.beam(at(300.0, 90.0), at(470.0, -70.0), 38.0, 34.0, STEEL);
-        let f = at(470.0, -80.0);
-        m.frustum([f[0] - 34.0, f[1] - 30.0, -110.0], [f[0] + 34.0, f[1] + 30.0, -110.0], 10.0, -70.0, CONCRETE);
-        m.shard(at(300.0, 104.0), at(330.0, 150.0), 26.0, CRYSTAL);
-    }
-
-    // Authored at full size, shown at 0.6: the crown about a screen wide, legs and cannons nearly two.
-    // Bigger than the screen, still readable as one machine.
+    // Authored at full size, shown at 0.6: the crown about a screen wide; with legs and cannons (separate
+    // sprites, below) nearly three. Bigger than the screen, still readable as one machine.
     for v in m.verts.iter_mut() {
         *v = v.map(|c| c * QUEEN_SCALE);
     }
     model("boss.s1.gantry_queen", (512, 512), &[("roll", 49.0), ("roll_max_deg", 24.0)], m)
+}
+
+// The GANTRY QUEEN's materials (shared by the body and its parts).
+const CONCRETE: u8 = 0;
+const GLASS: u8 = 1;
+const CRYSTAL: u8 = 2;
+const HAZARD: u8 = 3;
+const GLOW: u8 = 4;
+const STEEL: u8 = 5;
+
+fn queen_mesh() -> Mesh {
+    Mesh::new(vec![
+        Material::lit(&[VOID, DARK, LIGHT], 0.58, 1), // concrete: flat tops dark, light-facing slopes catch light
+        Material::lit(&[VOID, DARK, HOT], 0.5, 0),    // smoked glass: dark, glints hot toward the light
+        Material::lit(&[DARK, HOT], 1.0, 0),          // Lattice crystal
+        Material::lit(&[VOID, DARK, HOT], 0.72, 1),   // weapons: hazard-striped, hot
+        Material::glow(HOT),                          // muzzles, beacon
+        Material::lit(&[VOID, DARK, LIGHT], 0.5, 1),  // legs and struts
+    ])
+}
+
+/// Arm aim samples (barrels swept from left to right) and leg stride poses; parts also roll with the
+/// body, coarsely (their own roll samples, nearest to the body's bank).
+pub const ARM_AIMS: usize = 5;
+pub const ARM_AIM_MAX_DEG: f64 = 18.0;
+pub const LEG_STRIDES: usize = 6;
+pub const PART_ROLLS: f64 = 7.0;
+
+/// A cannon arm (`sx` = -1 left, 1 right) at aim `k`: a beam out from the cab, an elbow block, twin
+/// barrels pointing at the player (-y), a crystal plate. The arm swings about its shoulder.
+pub fn queen_arm(sx: f64, k: usize) -> ModelFile {
+    let mut m = queen_mesh();
+    m.beam([sx * 170.0, 0.0, 160.0], [sx * 400.0, -10.0, 150.0], 46.0, 34.0, HAZARD);
+    m.frustum([sx * 400.0 - 40.0, -50.0, 120.0], [sx * 400.0 + 40.0, 30.0, 120.0], 10.0, 176.0, STEEL);
+    for dx in [-18.0, 18.0] {
+        let x = sx * 400.0 + dx;
+        m.tube([x, -40.0, 160.0], [x, -210.0, 160.0], 11.0, 6, HAZARD, GLOW);
+    }
+    m.shard([sx * 300.0, -6.0, 172.0], [sx * 330.0, 40.0, 215.0], 20.0, CRYSTAL);
+    // Barrels sweep toward +x as the aim index rises: rotate about the shoulder's vertical axis.
+    let a = (k as f64 / (ARM_AIMS - 1) as f64 * 2.0 - 1.0) * ARM_AIM_MAX_DEG.to_radians();
+    swivel(&mut m, [sx * 170.0, 0.0], a);
+    let side = if sx < 0.0 { "left" } else { "right" };
+    let c = crate::demo::QUEEN_ARM_CENTER;
+    part(&format!("boss.s1.gantry_queen.arm_{side}.aim{k}"), m, [sx * c[0] as f64, c[1] as f64, c[2] as f64], crate::demo::QUEEN_ARM_CANVAS)
+}
+
+/// A leg (`ax`, `ay` = ±1: the quadrant) at stride pose `k`: hip on the shaft, knee hump, foot pad,
+/// crystal plate on the knee. Hovering, the legs paddle: each swings about its hip and lifts its foot.
+pub fn queen_leg(ax: f64, ay: f64, k: usize) -> ModelFile {
+    let mut m = queen_mesh();
+    let ph = k as f64 / LEG_STRIDES as f64 * 2.0 * PI;
+    let lift = 40.0 * (1.0 + ph.cos()) / 2.0;
+    let a: f64 = 0.50; // ~29 deg off the x axis
+    let dir = [ax * a.cos(), ay * a.sin()];
+    let at = |r: f64, z: f64| -> V3 { [dir[0] * r, dir[1] * r, z] };
+    m.beam(at(60.0, 20.0), at(300.0, 90.0 + lift / 2.0), 44.0, 38.0, STEEL);
+    m.beam(at(300.0, 90.0 + lift / 2.0), at(470.0, -70.0 + lift), 38.0, 34.0, STEEL);
+    let f = at(470.0, -80.0 + lift);
+    m.frustum([f[0] - 34.0, f[1] - 30.0, -110.0 + lift], [f[0] + 34.0, f[1] + 30.0, -110.0 + lift], 10.0, -70.0 + lift, CONCRETE);
+    m.shard(at(300.0, 104.0 + lift / 2.0), at(330.0, 150.0 + lift / 2.0), 26.0, CRYSTAL);
+    let hip = at(60.0, 0.0);
+    swivel(&mut m, [hip[0], hip[1]], ax * ay * 12f64.to_radians() * ph.sin());
+    let name = format!("boss.s1.gantry_queen.leg_{}{}.stride{k}", if ay > 0.0 { "n" } else { "s" }, if ax > 0.0 { "e" } else { "w" });
+    let c = crate::demo::QUEEN_LEG_CENTER;
+    part(&name, m, [ax * c[0] as f64, ay * c[1] as f64, c[2] as f64], crate::demo::QUEEN_LEG_CANVAS)
+}
+
+/// Every GANTRY QUEEN part in demo frame order: arms (left, right) × aims, then legs (nw, ne, sw, se)
+/// × strides; each file carries its own roll samples.
+pub fn queen_parts() -> Vec<ModelFile> {
+    let mut out = Vec::new();
+    for sx in [-1.0, 1.0] {
+        for k in 0..ARM_AIMS {
+            out.push(queen_arm(sx, k));
+        }
+    }
+    for (ax, ay) in [(-1.0, 1.0), (1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)] {
+        for k in 0..LEG_STRIDES {
+            out.push(queen_leg(ax, ay, k));
+        }
+    }
+    out
+}
+
+/// Rotate the mesh about the vertical axis through `pivot` (x, y), counter-clockwise from above.
+fn swivel(m: &mut Mesh, pivot: [f64; 2], a: f64) {
+    let (s, c) = a.sin_cos();
+    for v in m.verts.iter_mut() {
+        let (x, y) = (v[0] - pivot[0], v[1] - pivot[1]);
+        *v = [pivot[0] + x * c - y * s, pivot[1] + x * s + y * c, v[2]];
+    }
+}
+
+/// A part: scaled like the body, then moved so `center` (in scaled body coordinates, hires) is its
+/// origin. The scene puts the part's sprite at the body's rolled image of `center`.
+fn part(name: &str, mut m: Mesh, center: V3, canvas: (u16, u16)) -> ModelFile {
+    for v in m.verts.iter_mut() {
+        *v = [v[0] * QUEEN_SCALE - center[0], v[1] * QUEEN_SCALE - center[1], v[2] * QUEEN_SCALE - center[2]];
+    }
+    model(name, canvas, &[("roll", PART_ROLLS), ("roll_max_deg", crate::demo::QUEEN_ROLL_MAX_DEG as f64)], m)
 }
 
 #[cfg(test)]
@@ -425,7 +499,10 @@ mod tests {
         // 512 multicolor px = 1024 hires across, 512 lines tall, centred.
         assert!(lo[0] >= -512.0 && hi[0] <= 512.0, "x {lo:?} {hi:?}");
         assert!(lo[1] >= -256.0 && hi[1] <= 256.0, "y {lo:?} {hi:?}");
-        let n = q.mesh.tris.len();
+        // The assembly (body, two arms, four legs) is the BOSS budget.
+        let parts = queen_parts();
+        let n = q.mesh.tris.len() + 2 * parts[0].mesh.tris.len() + 4 * parts[2 * ARM_AIMS].mesh.tris.len();
         assert!((500..=4000).contains(&n), "{n} triangles");
     }
 }
+

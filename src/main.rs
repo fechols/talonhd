@@ -92,11 +92,17 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
     let previews = PathBuf::from("output");
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
 
-    let pano: Panorama = models::demo_panorama();
+    let pano: Panorama = talonhd::s1::panorama();
+    let share = talonhd::s1::code_share(&pano);
+    println!("S1 panorama: void {:.0} %, dark {:.0} %, light {:.1} %, hot {:.1} %", share[0] * 100.0, share[1] * 100.0, share[2] * 100.0, share[3] * 100.0);
+    let strip: Vec<[u8; 3]> = pano.codes.iter().map(|&c| talonhd::palette::PALETTE[pano.palette.color_of(c) as usize]).collect();
+    png::save_wide(&Path::new("output/sheets").join("panorama.png"), 160, &strip)?;
     let frames = models::demo_frames_with_assets();
     let pal = pano.palette;
     let groups = [
         ("boss", demo::BOSS_FRAME, demo::BOSS_BANKS),
+        ("arms", demo::ARM_FRAME, demo::LEG_FRAME - demo::ARM_FRAME),
+        ("legs", demo::LEG_FRAME, demo::DRONE_FRAME - demo::LEG_FRAME),
         ("drone", demo::DRONE_FRAME, demo::DRONE_YAWS),
         ("player", demo::PLAYER_FRAME, demo::PLAYER_BANKS),
     ];
@@ -284,7 +290,7 @@ fn cmd_lineup(args: &Args) -> Result<(), String> {
     let mut names = Vec::new();
     for p in &paths {
         let m = mesh::load(p)?;
-        if m.canvas.0 > 128 {
+        if m.canvas.0 > 128 || m.name.starts_with("boss.") {
             continue; // bosses get their own sheets
         }
         let all = m.render_all();

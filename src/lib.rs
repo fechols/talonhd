@@ -37,3 +37,5 @@ pub mod png;
 pub mod raster3d;
 #[cfg(feature = "host")]
 pub mod reference;
+#[cfg(feature = "host")]
+pub mod s1;
