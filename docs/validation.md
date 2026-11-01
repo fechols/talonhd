@@ -191,3 +191,39 @@ Bible: S1 models rev 7.
   Now compact: compile-time part tables, `#[inline(never)]` helpers; 17,394 of 17,407 bytes used.
 - `test_blit.py` and `test_hud_irq.py` pass. C64U (PRG `9e11f916e34ac69c…`): held frame t=253, render
   11.5 ms, background 2.7 ms → **0 mismatched bytes**.
+
+## 2026-11-01 — More code space; TALON's game on the C64U
+
+- **Relocated code.** The C64 program grew past `$4BFF`. Code now also runs from three regions copied at boot
+  (`talonhd_boot`) from one load image at `$4C00-$7BFF` (frame-buffer space, free until the first frame):
+  `.hitext` `$E500-$FEFF` (under the KERNAL), `.midtext` `$9000-$9FFF` (VIC bank 2 sees char ROM there, the
+  CPU sees RAM), `.lowtext` `$0200-$07FF`. Sections take attributed functions or whole modules by
+  mangled-name prefix. Build at `opt-level = "s"` (O2 inlined the sim to ~31 KB; "s" ~24 KB).
+- First boot hung: rewriting `link.ld` had dropped the `/DISCARD/ .init.250` rule, so the SDK's charset
+  switch called KERNAL CHROUT at `$FFD2`, now relocated sim code. Found by diffing C64 RAM against the PRG
+  and the section images (all intact), then disassembling the init chain.
+- **Simulation** vendored unchanged from TALON `95179bb` (`src/sim`): all its unit tests and the replay
+  digest `0x780fe9b1` pass here.
+- **Game layer** (`src/game.rs`): one sim tick per frame; the 304 × 176 playfield centred on screen; sprites
+  for the TALON (bank eased per tick), WASPs (16 yaws by heading), GANNETs (dive/level/pull-up/climb poses),
+  TWIN pairs, rounds, bombs, 3 burst frames, 4 SPARK frames; HUD from score, lives, gauge cursor, speed,
+  deaths. Attract mode: the sim's autopilot flies until the stick or SPACE is touched. `Game::ticks` never
+  resets (`World::tick` does at GAME OVER, which first hung the bake's replay). The GANTRY QUEEN flies over
+  the airfield as scenery (lines 4400-5200; the autopilot's games end near line 4700, so she arrives early).
+- Bake self-check: model = reference compositor at 13 attract ticks incl. a GANNET dive and the boss (t=9200).
+  REU image 4.80 MB (28.6 %).
+- C64U: about 50 frames per second, render 3.8-4.3 ms (background 2.2 ms). Held frame tick 2612 (score 2,600):
+  **0 mismatched bytes** against the host replay; tick 9388 (boss over the airfield, render 9.4 ms): **0 mismatched
+  bytes**.
+
+## 2026-11-01 — GANTRY QUEEN parts follow her bank (no more jumping legs)
+
+User: the legs "are moving far too many pixels per frame". Cause: 6 paddle poses changing every 8 frames (feet
+jumped 5-10 px) and only 7 roll samples per part (each 8° switch lurched a leg up to ~10 px). Now each arm
+and leg has one frame per body bank sample (49, 1° apart), rendered at the body's roll and posed by the
+bank: barrels lean 12° into the turn, legs trail 12° like pendulums (`hand::queen_part_frames`; bible S1
+models rev 8). `queen_parts_fit_and_move_smoothly`: no part touches its canvas, and no part's centroid moves
+1.5 px or more between neighbouring samples (the bank steps at most once every ~6 frames). Canvases
+re-measured: arms 96 × 216, legs 152 × 200. Arms 1.07 MB, legs 1.72 MB; image 5.31 MB (31.7 %). The 34
+per-pose `.mesh` files are gone (frames come straight from `hand.rs`); C64 code shrank ~900 bytes.
+C64U: held frame tick 9380 (boss over the airfield, render 9.5 ms): **0 mismatched bytes**.

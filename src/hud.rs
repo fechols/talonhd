@@ -278,6 +278,7 @@ fn put_digit(b: &mut [u8; BLOCK], column: usize, y: usize, d: usize) {
 /// Written for the 6502: byte stores from a compile-time table, digits by
 /// subtraction (no division).
 #[inline(never)]
+#[cfg_attr(target_arch = "mos", unsafe(link_section = ".hitext"))]
 pub fn dynamic_blocks(s: &State, out: &mut [[u8; BLOCK]; block::DYNAMIC_COUNT]) {
     for b in out.iter_mut() {
         *b = [0; BLOCK];

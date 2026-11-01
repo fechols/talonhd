@@ -220,17 +220,17 @@ impl Hw for Machine {
     }
 }
 
-/// Render demo time `t` into `buf` and present it, as the C64 does (the
-/// palette is set up here too; the C64 does that once at boot).
-pub fn render_demo(m: &mut Machine, img: &crate::render::Image, t: u16, buf: Buffer) -> crate::render::Scroll {
-    use crate::{demo, render};
-    let mut sprites = [render::Sprite::default(); demo::INSTANCES];
-    let n = demo::scene(t, &mut sprites);
-    let scroll = render::Scroll::new(img, demo::scroll(t));
+/// Render the game state `g` into `buf` and present it, as the C64 does (the palette is set up here too;
+/// the C64 does that once at boot).
+pub fn render_game(m: &mut Machine, img: &crate::render::Image, g: &crate::game::Game, buf: Buffer) -> crate::render::Scroll {
+    use crate::{game, render};
+    let mut sprites = [render::Sprite::default(); game::INSTANCES];
+    let n = game::scene(g, &mut sprites);
+    let scroll = render::Scroll::new(img, game::scroll(g));
     render::set_palette(m, img.palette);
     render::render_frame(m, img, buf, scroll, &mut sprites[..n]);
     render::present(m, buf, scroll);
     render::hud_init(m, img);
-    render::hud_update(m, &demo::hud_state(t));
+    render::hud_update(m, &game::hud_state(g));
     scroll
 }

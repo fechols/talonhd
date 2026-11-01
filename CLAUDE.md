@@ -36,7 +36,7 @@ Host (run cargo from **PowerShell**: Git Bash's `link` shadows MSVC):
 cargo test --release                     # renderer vs reference compositor, raster3d goldens
 cargo check --no-default-features        # shared library still builds no_std
 cargo run --release -- bake              # dist/talonhd.reu + output/{sheets,frames}/*.png, self-checked
-cargo run --release -- preview --t 150   # one demo frame through the model
+cargo run --release -- preview --t 150   # attract-mode tick 150 through the model
 cargo run --release --example queen_assembly   # output/lineup/queen.png: GANTRY QUEEN body + parts at 3 banks
 cargo run --release --example frame_stats -- dist/talonhd.reu 512   # DMAs / blends / I/O writes per frame
 ```
@@ -94,18 +94,29 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   void/dark/light at albedo ~0.6 with a solid-dark floor (no void checker over the sea); faceted tops.
 - **Sprite format:** column segments are Run, Mix or Skip (`SEG_SKIP`: subtract a gap from DATA, so holes cost no
   REU bytes). The Rust `draw_column`, `asm/blit.S` and `tools/test_blit.py` change together.
-- **Tech scene** (`src/demo.rs`, shared, integer-only; `src/models.rs`, host): the S1 BREAKWATER panorama
-  (`src/s1.rs`: 26 screens, sea → sea wall → docks → airfield; ground void/dark only, flat concrete = 50 %
-  checker, open ground 25 %, `light` for surf and paint, `hot` for crystal cracks; `bake` writes
-  `output/sheets/panorama.png`); the hand-built TALON, WASPs and GANTRY QUEEN: body (49 roll frames) plus
-  two arms (5 aims) and four legs (6 strides) as separate sprites, each part with 7 coarse rolls, placed at the
-  body's rolled image of its origin (`demo::PART_XY0` + compile-time `PART_DX`; no trig on the C64).
-  Procedural stand-ins only as fallbacks.
-- **C64 code space is full** (`$0801-$4BFF`, ~13 bytes left after the GANTRY QUEEN parts): keep shared code
-  compact (`#[inline(never)]` helpers, compile-time tables, no 32-bit math). Next growth (the sim) needs the
-  free RAM at `$E410-$FFF9` (relocated at startup) or REU code paging as in TALON.
+- **Game** (`src/sim/`, vendored unchanged from TALON; `src/game.rs`, shared): one sim tick per frame. The
+  304×176 playfield sits 8 px in and 8 lines down on the 320×192 screen; `game::scene` maps `World` to sprites
+  (TALON with an eased bank, WASPs by heading, GANNETs by dive state, TWIN pairs, bullets, bursts, SPARKs),
+  `game::hud_state` to the HUD. `Game::ticks` never resets (World::tick does at GAME OVER) and names the frame.
+  The C64 runs the sim's autopilot (attract mode) until the stick or SPACE is touched (`STATUS+28` HUMAN), so
+  `compare` replays `game::replay(SHOWN_T)` on the host. The GANTRY QUEEN flies over the airfield
+  (`demo::queen`, lines 4400-5200) as scenery: not fought yet.
+- **Frames and panorama:** `demo.rs` is the frame directory (boss body, arms, legs, WASP yaws, TALON banks,
+  GANNET pitches, shots, bursts, SPARKs) plus the boss's flight (`PART_XY0` + compile-time `PART_DX`; no trig
+  on the C64). Her six parts have one frame per body bank sample (`hand::queen_part_frames`, rendered at bake
+  time, no `.mesh` files): same roll as the body, posed by the bank (barrels lean in, legs trail), so nothing
+  jumps; `queen_parts_fit_and_move_smoothly` guards it. `src/s1.rs` paints the S1 BREAKWATER panorama (26 screens; ground void/dark only, flat concrete
+  50 % checker, open ground 25 %, `light` for surf and paint, `hot` for crystal; `output/sheets/panorama.png`).
+- **C64 code space** (`target-c64/link.ld`, `opt-level = "s"`): `$0801-$4BFF` plus three regions copied at boot
+  from one load image at `$4C00-$7BFF` (frame-buffer space, free until the first frame): `.hitext`
+  `$E500-$FEFF` (HUD, boss, `sim::actors`), `.midtext` `$9000-$9FFF` (VIC sees char ROM, CPU RAM:
+  `sim::collide/common/world`), `.lowtext` `$0200-$07FF` (`sim::gauge`, `render`). Placement is by mangled
+  name in the link script (or `#[cfg_attr(target_arch = "mos", unsafe(link_section = ".hitext"))]`). Every
+  region is nearly full: check `llvm-size -A dist/talonhd.elf` after changes. `World::digest` stays host-only
+  (2 KB of 6502). Keep the `/DISCARD/ .init.250` rule: it calls KERNAL CHROUT at `$FFD2`, which is our code now.
 - **Boot:** the PRG erases the REU magic, then waits for magic + whole-image checksum, so `run` then `upload-reu`
   always starts on the complete new image.
-- **Next:** the TALON simulation port (`src/sim`) with S1's waves on the new panorama, which needs more code
-  space first.
+- **Next:** fight the GANTRY QUEEN and the KEELBREAKER (sim runners for the S1 waves TALON has no runner for:
+  SKIFF, PILLBOX, HATCH, CRAWLER), the promotion sequence and the per-level REU load. More code will need REU
+  code paging (as TALON) or a leaner memory map.
 - **Hardware quirk:** `c64u.py run` right after `config` can reset the machine before the PRG loads; run again.

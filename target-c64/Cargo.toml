@@ -27,7 +27,7 @@ profile = []
 talonhd = { path = "..", default-features = false }
 
 [profile.release]
-opt-level = 2
+opt-level = "s"
 lto = "fat"
 codegen-units = 1
 panic = "abort"

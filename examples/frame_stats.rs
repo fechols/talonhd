@@ -1,9 +1,9 @@
-//! Per-frame work counts for the demo, from the host model.
+//! Per-frame work counts for the attract mode at tick `t`, from the host model.
 //! `cargo run --release --example frame_stats -- dist/talonhd.reu [t]`
 use talonhd::hw::Hw;
 use talonhd::layout::BUFFERS;
 use talonhd::model::Machine;
-use talonhd::{demo, render};
+use talonhd::{game, render};
 
 struct Counting<'a> {
     m: &'a mut Machine,
@@ -43,9 +43,10 @@ fn main() {
     let mut m = Machine::new(&image);
     let img = render::read_image(&mut m).unwrap();
     let mut c = Counting { m: &mut m, links: 0, other_dmas: 0, dma_bytes: 0, blends: 0, io_writes: 0, in_column: false };
-    let mut sprites = [render::Sprite::default(); demo::INSTANCES];
-    let n = demo::scene(t, &mut sprites);
-    let scroll = render::Scroll::new(&img, demo::scroll(t));
+    let g = game::replay(t as u32);
+    let mut sprites = [render::Sprite::default(); game::INSTANCES];
+    let n = game::scene(&g, &mut sprites);
+    let scroll = render::Scroll::new(&img, game::scroll(&g));
     render::render_frame(&mut c, &img, BUFFERS[0], scroll, &mut sprites[..n]);
     println!("t={t}: column links {} | setup/bg DMAs {} | DMA bytes {} | blends {} | I/O writes {}",
         c.links, c.other_dmas, c.dma_bytes, c.blends, c.io_writes);

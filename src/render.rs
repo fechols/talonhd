@@ -154,6 +154,7 @@ pub fn set_palette<H: Hw + ?Sized>(hw: &mut H, pal: Palette) {
 /// Copy the HUD's static sprite blocks into both VIC banks and set up the 8
 /// sprites (hires, unexpanded, in front, X positions). Call once at boot.
 #[inline(never)]
+#[cfg_attr(target_arch = "mos", unsafe(link_section = ".hitext"))]
 pub fn hud_init<H: Hw + ?Sized>(hw: &mut H, img: &Image) {
     for base in layout::HUD_BLOCK_BASE {
         hw::fetch(hw, img.hud, base, format::HUD_BLOCKS * hud::BLOCK as u16);
@@ -177,6 +178,7 @@ pub fn hud_init<H: Hw + ?Sized>(hw: &mut H, img: &Image) {
 /// (not its row counter, which the IRQ owns), the 8 colors and the dynamic
 /// blocks in both banks.
 #[inline(never)]
+#[cfg_attr(target_arch = "mos", unsafe(link_section = ".hitext"))]
 pub fn hud_update<H: Hw + ?Sized>(hw: &mut H, s: &hud::State) {
     let t = hud::build(s);
     let base = layout::HUD_TABLE;

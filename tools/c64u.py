@@ -116,7 +116,8 @@ def status(dev):
     return dict(magic=st[0], flipping=st[1], front=st[2],
                 shown_t=st[4] | st[5] << 8, render_us=st[6] | st[7] << 8, hold=st[8],
                 background_us=st[10] | st[11] << 8,
-                profile_setup_columns_kernel=[st[i] | st[i + 1] << 8 for i in range(16, 22, 2)]), st
+                profile_setup_columns_kernel=[st[i] | st[i + 1] << 8 for i in range(16, 22, 2)],
+                human=st[28]), st
 
 
 def main():

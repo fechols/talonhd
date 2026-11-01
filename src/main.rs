@@ -17,7 +17,7 @@ use talonhd::encode::SpriteImage;
 use talonhd::layout::{self, BUFFERS, status};
 use talonhd::model::{self, Machine};
 use talonhd::render::{self, Scroll};
-use talonhd::{demo, mesh, models, png, reference};
+use talonhd::{demo, game, mesh, models, png, reference};
 
 struct Args(Vec<String>);
 
@@ -73,15 +73,17 @@ fn load_image(path: &Path) -> Result<(Machine, render::Image), String> {
     Ok((m, img))
 }
 
-/// A contact sheet of frames side by side (multicolor pixels).
+/// A contact sheet of frames side by side (multicolor pixels), each in a cell the size of the largest.
 fn sheet(frames: &[SpriteImage], pal: render::Palette) -> (usize, Vec<[u8; 3]>) {
-    let (w, h) = (frames[0].w as usize, frames[0].h as usize);
+    let w = frames.iter().map(|f| f.w as usize).max().unwrap_or(1);
+    let h = frames.iter().map(|f| f.h as usize).max().unwrap_or(1);
     let n = frames.len();
     let mut out = vec![[0u8; 3]; w * n * h];
     for (k, f) in frames.iter().enumerate() {
+        let (fw, fh) = (f.w as usize, f.h as usize);
         let p = bake::sprite_preview(f, pal);
-        for y in 0..h {
-            out[y * w * n + k * w..y * w * n + k * w + w].copy_from_slice(&p[y * w..y * w + w]);
+        for y in 0..fh {
+            out[y * w * n + k * w..y * w * n + k * w + fw].copy_from_slice(&p[y * fw..y * fw + fw]);
         }
     }
     (w * n, out)
@@ -105,6 +107,8 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         ("legs", demo::LEG_FRAME, demo::DRONE_FRAME - demo::LEG_FRAME),
         ("drone", demo::DRONE_FRAME, demo::DRONE_YAWS),
         ("player", demo::PLAYER_FRAME, demo::PLAYER_BANKS),
+        ("gannet", demo::GANNET_FRAME, 2 * demo::GANNET_PITCHES),
+        ("shots", demo::PAIR_FRAME, demo::FRAMES - demo::PAIR_FRAME),
     ];
     let mut total = pano.rows as usize * 320;
     println!("panorama: {} cell rows, {} bytes", pano.rows, total);
@@ -124,11 +128,25 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
     // Self-check: the DMA renderer must match the naive compositor.
     let mut m = Machine::new(&image);
     let img = render::read_image(&mut m).unwrap();
-    for t in [0u16, 1, 2, 3, 77, 150, 299, 512, 777, 1001, 1500] {
+    // Attract-mode ticks: the first frames, WASP strings, a GANNET's dive and bombs, the docks, the boss.
+    let mut g = game::Game::new();
+    // The last check is the first tick the GANTRY QUEEN hovers over the apron.
+    let mut ticks = vec![0u32, 1, 2, 3, 150, 450, 900, 1700, 3300, 3420, 5000, 7000];
+    let mut probe = game::Game::new();
+    while probe.world.scroll_lines() % demo::PANO_PERIOD as u32 != 4600 && probe.ticks < 60_000 {
+        let input = talonhd::sim::replay::autopilot(&probe.world);
+        probe.step(input);
+    }
+    ticks.push(probe.ticks);
+    for t in ticks {
+        while g.ticks < t {
+            let input = talonhd::sim::replay::autopilot(&g.world);
+            g.step(input);
+        }
         let buf = BUFFERS[(t & 1) as usize];
-        let scroll = model::render_demo(&mut m, &img, t, buf);
-        let mut sc = [render::Sprite::default(); demo::INSTANCES];
-        let n = demo::scene(t, &mut sc);
+        let scroll = model::render_game(&mut m, &img, &g, buf);
+        let mut sc = [render::Sprite::default(); game::INSTANCES];
+        let n = game::scene(&g, &mut sc);
         let want = reference::compose(&pano, &frames, scroll, &sc[..n]);
         check(&m, buf, &want).map_err(|e| format!("t={t}: {e}"))?;
         png::save(&previews.join(format!("frames/t{t:04}.png")), 320, layout::VISIBLE as u32, &m.visible_with_hud(buf, img.palette.d021, scroll.fine))?;
@@ -163,7 +181,8 @@ fn cmd_preview(args: &Args) -> Result<(), String> {
     let (mut m, img) = load_image(&args.path("--reu", "dist/talonhd.reu"))?;
     let t = args.num("--t", 0)?;
     let out = args.path("--out", "output/preview.png");
-    let scroll = model::render_demo(&mut m, &img, t, BUFFERS[0]);
+    let g = game::replay(t as u32);
+    let scroll = model::render_game(&mut m, &img, &g, BUFFERS[0]);
     png::save(&out, 320, layout::VISIBLE as u32, &m.visible_with_hud(BUFFERS[0], img.palette.d021, scroll.fine))?;
     println!("t={t}: {:?}", m.stats);
     Ok(())
@@ -184,7 +203,12 @@ fn cmd_compare(args: &Args) -> Result<(), String> {
     let front = BUFFERS[st[status::FRONT as usize] as usize & 1];
     let shown = st[status::SHOWN_T as usize] as u16 | (st[status::SHOWN_T as usize + 1] as u16) << 8;
     let t = args.num("--t", shown)?;
-    let scroll: Scroll = model::render_demo(&mut m, &img, t, front);
+    if st[status::HUMAN as usize] != 0 {
+        return Err("a player has taken over: only the attract mode replays on the host".into());
+    }
+    let g = game::replay(t as u32);
+    println!("tick {t}: attract-mode replay (score {}, lives {}, stage line {})", g.world.score, g.world.lives, g.world.scroll_lines());
+    let scroll: Scroll = model::render_game(&mut m, &img, &g, front);
 
     let bitmap = read(&dump.join("bitmap.bin"))?;
     let screen = read(&dump.join("screen.bin"))?;

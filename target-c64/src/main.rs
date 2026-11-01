@@ -1,7 +1,10 @@
-//! TALON HD tech scene for the C64 Ultimate: a 512×512 3D-rendered boss,
-//! drones and the player's ship over a vertically scrolling panorama, all
-//! pixels DMA'd by the REU into a double-buffered 160×200 multicolor bitmap.
-//! (Main loop vendored from gclass `a5775bf`.)
+//! TALON HD for the C64 Ultimate: TALON's S1 game (the vendored simulation, one tick per frame) drawn as
+//! 3D-rendered software sprites over the scrolling S1 panorama, all pixels DMA'd by the REU into a
+//! double-buffered 160×200 multicolor bitmap. (Main loop vendored from gclass `a5775bf`.)
+//!
+//! Attract mode: the sim's autopilot flies until the joystick (port 2) or SPACE is touched; from then on
+//! the player does, until GAME OVER hands the stick back. While the autopilot flies, every frame is a pure
+//! function of the tick count, so `talonhd compare` replays it on the host and checks digest and pixels.
 //!
 //! Needs the matching `talonhd.reu` at REU address 0 (16 MB REU); until it
 //! appears the border flashes red, so it may be uploaded after starting.
@@ -11,8 +14,9 @@
 
 use core::ptr::{read_volatile, write_volatile};
 
-use talonhd::demo;
+use talonhd::game::{self, Game};
 use talonhd::hw::Hw;
+use talonhd::sim::{self, world::GAME_OVER};
 use talonhd::layout::{self, BUFFERS, status};
 use talonhd::render::{self, Image, Scroll, Sprite};
 
@@ -30,6 +34,11 @@ struct C64;
 /// the last mark time.
 static mut PROFILE: [u16; 3] = [0; 3];
 static mut LAST_MARK: u16 = 0;
+
+/// The game and this frame's sprites live in BSS (the soft stack under $D000 is small); the game is
+/// zero here and set up by `Game::reset` at boot (no 700-byte initial image in the program).
+static mut GAME: Game = unsafe { core::mem::zeroed() };
+static mut SPRITES: [Sprite; game::INSTANCES] = [Sprite { frame: 0, x: 0, y: 0, z: 0 }; game::INSTANCES];
 
 impl Hw for C64 {
     #[inline(always)]
@@ -91,6 +100,22 @@ fn in_vblank(c: &mut C64) -> bool {
     !(40..251).contains(&r)
 }
 
+/// The input byte (talon::sim UP DOWN LEFT RIGHT FIRE ARM): joystick port 2 from CIA1 port A, ARM from
+/// SPACE (keyboard row 7, column 4), as TALON reads them (no POTX second button here).
+#[inline(never)]
+fn read_input(c: &mut C64) -> u8 {
+    c.poke(0xDC02, 0xFF);
+    c.poke(0xDC00, 0xFF);
+    let mut input = !c.peek(0xDC00) & 31;
+    let idle = c.peek(0xDC01);
+    c.poke(0xDC00, 0x7F);
+    if c.peek(0xDC01) & idle & 16 == 0 && idle & 16 != 0 {
+        input |= sim::ARM;
+    }
+    c.poke(0xDC00, 0xFF);
+    input
+}
+
 fn fatal(c: &mut C64, color: u8) -> ! {
     loop {
         c.poke(0xD020, color);
@@ -144,7 +169,12 @@ pub extern "C" fn main() -> i16 {
     // HUD: sprite blocks into both banks, sprites set up, the multiplexer
     // table filled, then the raster IRQ chain started at the top border.
     render::hud_init(c, &img);
-    render::hud_update(c, &demo::hud_state(0));
+    #[allow(static_mut_refs)]
+    let g = unsafe { &mut GAME };
+    g.reset();
+    #[allow(static_mut_refs)]
+    let sprites = unsafe { &mut SPRITES };
+    render::hud_update(c, &game::hud_state(g));
     c.poke(layout::HUD_TABLE, 0);
     let vector = hud_irq as usize as u16;
     c.poke(0xFFFE, vector as u8);
@@ -153,12 +183,13 @@ pub extern "C" fn main() -> i16 {
     c.poke(0xD019, 0xFF);
     c.poke(0xD01A, 0x01);
     unsafe { hud_irq_enable() };
-    for i in 0..16 {
+    for i in 0..32 {
         c.poke(layout::STATUS + i, 0);
     }
 
-    let mut sprites = [Sprite::default(); demo::INSTANCES];
-    let mut t: u16 = 0;
+    let mut human = false;
+    // Ever touched: from then on the frames are no longer the host's attract-mode replay.
+    let mut touched = false;
     let mut back = 1usize;
     let mut flipped_at = micros(c);
     loop {
@@ -166,8 +197,8 @@ pub extern "C" fn main() -> i16 {
         let start = micros(c);
         #[cfg(feature = "raster-bars")]
         c.poke(0xD020, 2);
-        let n = demo::scene(t, &mut sprites);
-        let scroll = Scroll::new(&img, demo::scroll(t));
+        let n = game::scene(g, sprites);
+        let scroll = Scroll::new(&img, game::scroll(g));
         // render::render_frame, split so the background can be timed.
         render::restore_background(c, &img, buf, scroll);
         let bg = micros(c).wrapping_sub(start);
@@ -204,15 +235,27 @@ pub extern "C" fn main() -> i16 {
         // present() also turns the display on: $D011 = bitmap, 24 rows, YSCROLL.
         render::present(c, buf, scroll);
         flipped_at = micros(c);
-        render::hud_update(c, &demo::hud_state(t));
+        render::hud_update(c, &game::hud_state(g));
         c.poke(layout::STATUS + status::FRONT, back as u8);
-        status_poke16(c, status::SHOWN_T, t);
+        status_poke16(c, status::SHOWN_T, g.ticks as u16);
+        c.poke(layout::STATUS + status::HUMAN, touched as u8);
         c.poke(layout::STATUS + status::FLIPPING, 0);
         c.poke(layout::STATUS + status::MAGIC, layout::STATUS_MAGIC);
 
         back ^= 1;
         if c.peek(layout::STATUS + status::HOLD) == 0 {
-            t = t.wrapping_add(1);
+            // One sim tick per displayed frame. The stick takes over from the autopilot when touched
+            // and hands back at GAME OVER.
+            let stick = read_input(c);
+            if stick != 0 {
+                human = true;
+                touched = true;
+            }
+            if g.world.state == GAME_OVER {
+                human = false;
+            }
+            let input = if human { stick } else { sim::replay::autopilot(&g.world) };
+            g.step(input);
         }
     }
 }

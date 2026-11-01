@@ -108,6 +108,8 @@ pub mod status {
     /// 3 × u16 (feature `profile`): sprite time in setup / column overhead /
     /// column kernel, in µs.
     pub const PROFILE_US: u16 = 16;
+    /// Nonzero once a player has touched the stick (the frame is no longer the attract-mode replay).
+    pub const HUMAN: u16 = 28;
 }
 
 pub const STATUS_MAGIC: u8 = 0xC1;

@@ -161,20 +161,11 @@ pub fn demo_frames_with_assets() -> Vec<SpriteImage> {
             frames[demo::BOSS_FRAME as usize + i] = f;
         }
     }
-    // Her arms and legs, when the body is hers: the files in `hand::queen_parts` order, each with its rolls.
+    // Her arms and legs, when the body is hers: posed per bank sample, rendered from `hand.rs`.
     if std::path::Path::new(QUEEN_MESH).exists() {
-        let mut at = demo::ARM_FRAME as usize;
-        for p in crate::hand::queen_parts() {
-            let path = format!("assets/models/{}.mesh", p.name);
-            let m = crate::mesh::load(std::path::Path::new(&path)).unwrap_or(p);
-            let rendered = m.render_all();
-            assert_eq!(rendered.len(), demo::PART_ROLLS as usize, "{}: part roll samples", m.name);
-            for f in rendered {
-                frames[at] = f;
-                at += 1;
-            }
+        for (k, f) in crate::hand::queen_part_frames().into_iter().enumerate() {
+            frames[demo::ARM_FRAME as usize + k] = f;
         }
-        assert_eq!(at, demo::DRONE_FRAME as usize);
     }
     if let Ok(m) = crate::mesh::load(std::path::Path::new(WASP_MESH)) {
         // The hand-built WASP flies the drone paths: its 16 yaws, level (on the stand-in's canvas).
@@ -218,7 +209,110 @@ pub fn demo_frames() -> Vec<SpriteImage> {
     for roll in banks(demo::PLAYER_BANKS, 1.0) {
         out.push(raster3d::render(&f, Orient { yaw: 0.0, pitch: 0.0, roll }, view));
     }
+    out.extend(game_frames());
     assert_eq!(out.len(), demo::FRAMES as usize);
     out
+}
+
+/// The game's frames after the ships: the GANNET (hand-built), TWIN pairs, enemy bullets, explosions and
+/// SPARKs (drawn pixel by pixel: they are a few pixels across).
+pub fn game_frames() -> Vec<SpriteImage> {
+    let mut out = Vec::new();
+    let g = crate::hand::gannet();
+    let view = View::centered(demo::GANNET_W, demo::GANNET_H, 1.0);
+    let max = g.orient.get("pitch_max_deg").copied().unwrap_or(50.0).to_radians();
+    for yaw in [PI, 0.0] {
+        for k in 0..demo::GANNET_PITCHES {
+            // Index 0 is the full dive (nose toward the viewer), the last pitched away.
+            let pitch = max * (1.0 - 2.0 * k as f64 / (demo::GANNET_PITCHES - 1) as f64);
+            out.push(raster3d::render(&g.mesh, Orient { yaw, pitch, roll: 0.0 }, view));
+        }
+    }
+    // TWIN: two 4 x 10 bolts 8 px apart (multicolor columns 1-2 and 5-6), light with a hot head and a
+    // dark tail. Variants: left only, right only, both.
+    for alive in 1..=3u8 {
+        let mut img = SpriteImage::new(demo::PAIR_W, demo::PAIR_H);
+        for (bit, x0) in [(1u8, 1u16), (2, 5)] {
+            if alive & bit != 0 {
+                for y in 0..demo::PAIR_H {
+                    let c = if y < 2 { HOT } else if y < 8 { LIGHT } else { DARK };
+                    img.set(x0, y, Some(c));
+                    img.set(x0 + 1, y, Some(c));
+                }
+            }
+        }
+        out.push(img);
+    }
+    out.push(pattern(&[".h.", "hlh", "hlh", "hlh", ".h."]));
+    out.push(pattern(&[".d.", "ddd", "ddd", "ddd", "ddd", "dhd", ".h.", ".h."]));
+    for k in 0..demo::BURST_FRAMES {
+        out.push(burst(k));
+    }
+    for k in 0..demo::SPARK_FRAMES {
+        // A spinning diamond: its width breathes 3, 2, 1, 2 multicolor px.
+        let half = [3i32, 2, 1, 2][k as usize];
+        let mut img = SpriteImage::new(demo::SPARK_W, demo::SPARK_H);
+        for y in 0..demo::SPARK_H as i32 {
+            let w = (half * (5 - (y * 2 - 9).abs() / 2) + 4) / 5;
+            for x in 0..demo::SPARK_W as i32 {
+                let d = (x * 2 - 5).abs() / 2;
+                if d < w.max(1) {
+                    img.set(x as u16, y as u16, Some(if d + 1 >= w && w > 1 { LIGHT } else { HOT }));
+                }
+            }
+        }
+        out.push(img);
+    }
+    out
+}
+
+/// A small sprite from text rows: `.` transparent, `v` void, `d` dark, `l` light, `h` hot.
+fn pattern(rows: &[&str]) -> SpriteImage {
+    let mut img = SpriteImage::new(rows[0].len() as u16, rows.len() as u16);
+    for (y, row) in rows.iter().enumerate() {
+        for (x, ch) in row.chars().enumerate() {
+            let c = match ch {
+                'v' => Some(VOID),
+                'd' => Some(DARK),
+                'l' => Some(LIGHT),
+                'h' => Some(HOT),
+                _ => None,
+            };
+            img.set(x as u16, y as u16, c);
+        }
+    }
+    img
+}
+
+/// Explosion frame `k`: a light flash with a hot ring, then a broken hot ring, then dark smoke. A
+/// multicolor pixel is two lines wide, so radii in lines are halved across.
+fn burst(k: u16) -> SpriteImage {
+    let (w, h) = (demo::BURST_W, demo::BURST_H);
+    let mut img = SpriteImage::new(w, h);
+    let (r0, r1) = [(0.0, 9.0), (8.0, 16.0), (13.0, 21.0)][k as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let (dx, dy) = ((x as f64 + 0.5 - w as f64 / 2.0) * 2.0, y as f64 + 0.5 - h as f64 / 2.0);
+            let r = (dx * dx + dy * dy).sqrt();
+            let noise = ((x as u32 * 7919 + y as u32 * 104_729 + k as u32 * 31) * 2_654_435_761) >> 28;
+            if r < r1 && r >= r0 {
+                let c = match k {
+                    0 => Some(if r < 5.0 { LIGHT } else { HOT }),
+                    1 => match noise {
+                        0..=3 => None,
+                        4..=6 => Some(LIGHT),
+                        _ => Some(HOT),
+                    },
+                    _ => match noise {
+                        0..=8 => None,
+                        9..=10 => Some(HOT),
+                        _ => Some(DARK),
+                    },
+                };
+                img.set(x, y, c);
+            }
+        }
+    }
+    img
 }
 

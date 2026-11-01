@@ -36,7 +36,6 @@ pub fn all() -> Vec<(String, ModelFile)> {
     for k in 0..HATCH_POSES {
         out.push((format!("enemy.common.hatch.open{k}"), hatch(k)));
     }
-    out.extend(queen_parts().into_iter().map(|m| (m.name.clone(), m)));
     out
 }
 
@@ -383,16 +382,21 @@ fn queen_mesh() -> Mesh {
     ])
 }
 
-/// Arm aim samples (barrels swept from left to right) and leg stride poses; parts also roll with the
-/// body, coarsely (their own roll samples, nearest to the body's bank).
-pub const ARM_AIMS: usize = 5;
-pub const ARM_AIM_MAX_DEG: f64 = 18.0;
-pub const LEG_STRIDES: usize = 6;
-pub const PART_ROLLS: f64 = 7.0;
+/// How the parts follow the body's bank `f` (-1 full left .. 1 full right, i.e. moving left .. right):
+/// the barrels lean into the turn; the hanging legs trail behind it like pendulums.
+pub const ARM_LEAN_DEG: f64 = 12.0;
+pub const LEG_SWING_DEG: f64 = 12.0;
 
-/// A cannon arm (`sx` = -1 left, 1 right) at aim `k`: a beam out from the cab, an elbow block, twin
-/// barrels pointing at the player (-y), a crystal plate. The arm swings about its shoulder.
-pub fn queen_arm(sx: f64, k: usize) -> ModelFile {
+/// The body's bank sample `b` (0..49) as a fraction (-1..1) and as a roll in radians.
+pub fn queen_bank(b: usize) -> (f64, f64) {
+    let n = crate::demo::BOSS_BANKS as f64 - 1.0;
+    let f = b as f64 / n * 2.0 - 1.0;
+    (f, (f * crate::demo::QUEEN_ROLL_MAX_DEG as f64).to_radians())
+}
+
+/// A cannon arm (`sx` = -1 left, 1 right) posed for bank sample `b`: a beam out from the cab, an elbow
+/// block, twin barrels pointing at the player (-y), a crystal plate; swivelled at the shoulder.
+pub fn queen_arm(sx: f64, b: usize) -> Mesh {
     let mut m = queen_mesh();
     m.beam([sx * 170.0, 0.0, 160.0], [sx * 400.0, -10.0, 150.0], 46.0, 34.0, HAZARD);
     m.frustum([sx * 400.0 - 40.0, -50.0, 120.0], [sx * 400.0 + 40.0, 30.0, 120.0], 10.0, 176.0, STEEL);
@@ -401,47 +405,53 @@ pub fn queen_arm(sx: f64, k: usize) -> ModelFile {
         m.tube([x, -40.0, 160.0], [x, -210.0, 160.0], 11.0, 6, HAZARD, GLOW);
     }
     m.shard([sx * 300.0, -6.0, 172.0], [sx * 330.0, 40.0, 215.0], 20.0, CRYSTAL);
-    // Barrels sweep toward +x as the aim index rises: rotate about the shoulder's vertical axis.
-    let a = (k as f64 / (ARM_AIMS - 1) as f64 * 2.0 - 1.0) * ARM_AIM_MAX_DEG.to_radians();
-    swivel(&mut m, [sx * 170.0, 0.0], a);
-    let side = if sx < 0.0 { "left" } else { "right" };
+    // Counter-clockwise from above swings the barrels toward +x: into a turn to the right.
+    swivel(&mut m, [sx * 170.0, 0.0], (ARM_LEAN_DEG * queen_bank(b).0).to_radians());
     let c = crate::demo::QUEEN_ARM_CENTER;
-    part(&format!("boss.s1.gantry_queen.arm_{side}.aim{k}"), m, [sx * c[0] as f64, c[1] as f64, c[2] as f64], crate::demo::QUEEN_ARM_CANVAS)
+    part(m, [sx * c[0] as f64, c[1] as f64, c[2] as f64])
 }
 
-/// A leg (`ax`, `ay` = ±1: the quadrant) at stride pose `k`: hip on the shaft, knee hump, foot pad,
-/// crystal plate on the knee. Hovering, the legs paddle: each swings about its hip and lifts its foot.
-pub fn queen_leg(ax: f64, ay: f64, k: usize) -> ModelFile {
+/// A leg (`ax`, `ay` = ±1: the quadrant) posed for bank sample `b`: hip on the shaft, knee hump, foot
+/// pad, crystal plate on the knee; swung about the hip so the foot trails the direction of travel.
+pub fn queen_leg(ax: f64, ay: f64, b: usize) -> Mesh {
     let mut m = queen_mesh();
-    let ph = k as f64 / LEG_STRIDES as f64 * 2.0 * PI;
-    let lift = 40.0 * (1.0 + ph.cos()) / 2.0;
     let a: f64 = 0.50; // ~29 deg off the x axis
     let dir = [ax * a.cos(), ay * a.sin()];
     let at = |r: f64, z: f64| -> V3 { [dir[0] * r, dir[1] * r, z] };
-    m.beam(at(60.0, 20.0), at(300.0, 90.0 + lift / 2.0), 44.0, 38.0, STEEL);
-    m.beam(at(300.0, 90.0 + lift / 2.0), at(470.0, -70.0 + lift), 38.0, 34.0, STEEL);
-    let f = at(470.0, -80.0 + lift);
-    m.frustum([f[0] - 34.0, f[1] - 30.0, -110.0 + lift], [f[0] + 34.0, f[1] + 30.0, -110.0 + lift], 10.0, -70.0 + lift, CONCRETE);
-    m.shard(at(300.0, 104.0 + lift / 2.0), at(330.0, 150.0 + lift / 2.0), 26.0, CRYSTAL);
+    m.beam(at(60.0, 20.0), at(300.0, 90.0), 44.0, 38.0, STEEL);
+    m.beam(at(300.0, 90.0), at(470.0, -70.0), 38.0, 34.0, STEEL);
+    let f = at(470.0, -80.0);
+    m.frustum([f[0] - 34.0, f[1] - 30.0, -110.0], [f[0] + 34.0, f[1] + 30.0, -110.0], 10.0, -70.0, CONCRETE);
+    m.shard(at(300.0, 104.0), at(330.0, 150.0), 26.0, CRYSTAL);
+    // Rotating by θ about the hip moves the foot by θ·R·(-ay·sin a) in x: sign ay makes every foot trail.
     let hip = at(60.0, 0.0);
-    swivel(&mut m, [hip[0], hip[1]], ax * ay * 12f64.to_radians() * ph.sin());
-    let name = format!("boss.s1.gantry_queen.leg_{}{}.stride{k}", if ay > 0.0 { "n" } else { "s" }, if ax > 0.0 { "e" } else { "w" });
+    swivel(&mut m, [hip[0], hip[1]], ay * (LEG_SWING_DEG * queen_bank(b).0).to_radians());
     let c = crate::demo::QUEEN_LEG_CENTER;
-    part(&name, m, [ax * c[0] as f64, ay * c[1] as f64, c[2] as f64], crate::demo::QUEEN_LEG_CANVAS)
+    part(m, [ax * c[0] as f64, ay * c[1] as f64, c[2] as f64])
 }
 
-/// Every GANTRY QUEEN part in demo frame order: arms (left, right) × aims, then legs (nw, ne, sw, se)
-/// × strides; each file carries its own roll samples.
-pub fn queen_parts() -> Vec<ModelFile> {
-    let mut out = Vec::new();
-    for sx in [-1.0, 1.0] {
-        for k in 0..ARM_AIMS {
-            out.push(queen_arm(sx, k));
-        }
+/// Part `i` (arms left, right; legs nw, ne, sw, se: `demo::PART_CENTERS` order) posed for bank `b`.
+pub fn queen_part(i: usize, b: usize) -> Mesh {
+    match i {
+        0 => queen_arm(-1.0, b),
+        1 => queen_arm(1.0, b),
+        2 => queen_leg(-1.0, 1.0, b),
+        3 => queen_leg(1.0, 1.0, b),
+        4 => queen_leg(-1.0, -1.0, b),
+        _ => queen_leg(1.0, -1.0, b),
     }
-    for (ax, ay) in [(-1.0, 1.0), (1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)] {
-        for k in 0..LEG_STRIDES {
-            out.push(queen_leg(ax, ay, k));
+}
+
+/// Every part frame in the level image's order: per part, one frame per body bank sample, posed for
+/// that bank and rendered at the body's own roll (1° apart, so parts and body never disagree).
+pub fn queen_part_frames() -> Vec<crate::encode::SpriteImage> {
+    let mut out = Vec::new();
+    for i in 0..6 {
+        let (w, h) = crate::demo::PART_CANVAS[i];
+        let view = crate::raster3d::View::centered(w, h, 1.0);
+        for b in 0..crate::demo::BOSS_BANKS as usize {
+            let roll = queen_bank(b).1;
+            out.push(crate::raster3d::render(&queen_part(i, b), crate::raster3d::Orient { yaw: 0.0, pitch: 0.0, roll }, view));
         }
     }
     out
@@ -458,11 +468,11 @@ fn swivel(m: &mut Mesh, pivot: [f64; 2], a: f64) {
 
 /// A part: scaled like the body, then moved so `center` (in scaled body coordinates, hires) is its
 /// origin. The scene puts the part's sprite at the body's rolled image of `center`.
-fn part(name: &str, mut m: Mesh, center: V3, canvas: (u16, u16)) -> ModelFile {
+fn part(mut m: Mesh, center: V3) -> Mesh {
     for v in m.verts.iter_mut() {
         *v = [v[0] * QUEEN_SCALE - center[0], v[1] * QUEEN_SCALE - center[1], v[2] * QUEEN_SCALE - center[2]];
     }
-    model(name, canvas, &[("roll", PART_ROLLS), ("roll_max_deg", crate::demo::QUEEN_ROLL_MAX_DEG as f64)], m)
+    m
 }
 
 #[cfg(test)]
@@ -486,6 +496,42 @@ mod tests {
         assert!(bad.is_empty(), "clipped or empty: {bad:?}");
     }
 
+    /// No part frame touches its canvas edge, and between neighbouring bank samples no part's pixels move
+    /// far: the sway is smooth (the user saw the old 6-pose, 7-roll legs jump).
+    #[test]
+    fn queen_parts_fit_and_move_smoothly() {
+        let frames = queen_part_frames();
+        let n = crate::demo::BOSS_BANKS as usize;
+        for (k, img) in frames.iter().enumerate() {
+            let (w, h) = (img.w, img.h);
+            let edge = (0..w).any(|x| img.get(x, 0).is_some() || img.get(x, h - 1).is_some())
+                || (0..h).any(|y| img.get(0, y).is_some() || img.get(w - 1, y).is_some());
+            assert!(!edge, "part {} bank {} touches its canvas edge", k / n, k % n);
+        }
+        // Centroid shift between neighbouring banks (part-relative; the bank slide is exact and added by
+        // the scene), in multicolor px and lines.
+        let centroid = |img: &crate::encode::SpriteImage| {
+            let (mut sx, mut sy, mut c) = (0.0, 0.0, 0.0);
+            for y in 0..img.h {
+                for x in 0..img.w {
+                    if img.get(x, y).is_some() {
+                        sx += x as f64;
+                        sy += y as f64;
+                        c += 1.0;
+                    }
+                }
+            }
+            (sx / c, sy / c)
+        };
+        for i in 0..6 {
+            for b in 1..n {
+                let (a, c) = (centroid(&frames[i * n + b - 1]), centroid(&frames[i * n + b]));
+                let d = ((a.0 - c.0).powi(2) + (a.1 - c.1).powi(2)).sqrt();
+                assert!(d < 1.5, "part {i} bank {b}: centroid moves {d:.2} px");
+            }
+        }
+    }
+
     #[test]
     fn queen_fits_its_canvas_and_budget() {
         let q = gantry_queen();
@@ -500,9 +546,9 @@ mod tests {
         assert!(lo[0] >= -512.0 && hi[0] <= 512.0, "x {lo:?} {hi:?}");
         assert!(lo[1] >= -256.0 && hi[1] <= 256.0, "y {lo:?} {hi:?}");
         // The assembly (body, two arms, four legs) is the BOSS budget.
-        let parts = queen_parts();
-        let n = q.mesh.tris.len() + 2 * parts[0].mesh.tris.len() + 4 * parts[2 * ARM_AIMS].mesh.tris.len();
+        let n = q.mesh.tris.len() + (0..6).map(|i| queen_part(i, 24).tris.len()).sum::<usize>();
         assert!((500..=4000).contains(&n), "{n} triangles");
     }
 }
+
 

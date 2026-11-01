@@ -12,10 +12,12 @@
 
 pub mod demo;
 pub mod format;
+pub mod game;
 pub mod hud;
 pub mod hw;
 pub mod layout;
 pub mod render;
+pub mod sim;
 
 #[cfg(feature = "host")]
 pub mod bake;
