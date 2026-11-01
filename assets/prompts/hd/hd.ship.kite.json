@@ -1,0 +1,80 @@
+{
+  "id": "hd.ship.kite",
+  "create_image": {
+    "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: a long-winged flying-wing fighter in two greens, cyan crystal set into its leading edges, no tail, a small bubble of canopy glass. Shape: wide thin flying wing, sawtooth trailing edge, cyan crystal strips along both leading edges, central hump, no tail. Paint: light green composite skin, green panels, cyan crystal leading edges, light blue canopy glass, cyan exhaust glow. Parts painted distinctly: hull: light green composite skin; panels: green panels; crystal: cyan crystal leading edges; canopy: light blue canopy glass; glow: cyan exhaust glow. Only the object. No text, no markings, no pilot, no people, no base or stand."
+  },
+  "create": {
+    "model": "hero",
+    "texture_type": "simple",
+    "texture_size": 2048,
+    "target_num_faces": 1600,
+    "rig": false
+  },
+  "bake": {
+    "size_class": "M",
+    "canvas": [
+      60,
+      46
+    ],
+    "length_px": 44,
+    "tris": 200,
+    "orient": {
+      "roll": 9,
+      "roll_max_deg": 60
+    },
+    "materials": [
+      {
+        "name": "hull",
+        "source": "light green composite skin",
+        "ramp": [
+          "void",
+          "dark",
+          "light"
+        ],
+        "floor": 2,
+        "emissive": false
+      },
+      {
+        "name": "panels",
+        "source": "green panels",
+        "ramp": [
+          "void",
+          "dark",
+          "light"
+        ],
+        "floor": 2,
+        "emissive": false
+      },
+      {
+        "name": "crystal",
+        "source": "cyan crystal leading edges",
+        "ramp": [
+          "dark",
+          "hot"
+        ],
+        "floor": 0,
+        "emissive": false
+      },
+      {
+        "name": "canopy",
+        "source": "light blue canopy glass",
+        "ramp": [
+          "dark",
+          "light",
+          "hot"
+        ],
+        "floor": 1,
+        "emissive": false
+      },
+      {
+        "name": "glow",
+        "source": "cyan exhaust glow",
+        "ramp": [
+          "hot"
+        ],
+        "floor": 0,
+        "emissive": true
+      }
+    ]
+  }
+}

@@ -14,9 +14,12 @@ Claude is also the **art director**: proposes and defends the look; the user app
   RAM byte, 11 color RAM. Roles: 00 `void`, 01 `hull_dark`, 10 `hull_light`, 11 `hot`. One palette per stage; a
   write recolors everything (flashes, boss phases, stage transitions).
 - **One REU image per level** (16 MiB each, art + music), auto-loaded by the PRG between stages.
-- **Bible first** (planned TALON HD bible in `docs/story`, forked from TALON's): nothing is generated with Ludo for
-  an entity that isn't approved; prompts only from `bible.py export-prompts`. Ludo models: `ludo model
-  create-image` → `ludo model create --model hero` (GLB). Report credits after every batch.
+- **Bible first.** `docs/story` is TALON's approved bible (forked); `docs/story/hd/` is the approved HD layer that
+  wins where they differ (palette law, art direction, promotion ladder, ships, `[model]` blocks). Nothing is
+  generated with Ludo for an entity that isn't approved; requests come only from `python tools/bible_hd.py
+  export-prompts`. Report Ludo credits after every batch; always maximum quality (hero, 2048 textures).
+- **Promotion ladder.** At every stage clear QUILL is promoted and gets a new airframe in the next stage's colors
+  (`docs/story/hd/02-ladder.md`). Light belongs to the player; hot is the Lattice.
 - **Original, not a clone.** The polygon look is borrowed; no names, ships, stages or story from existing games.
 - **Vendored code** is recorded in `THIRD-PARTY.md` with its source commit. Never write to `../gclass`, `../talon`,
   `../sueme64`, `../impact`, `../pummel`.
@@ -35,6 +38,17 @@ cargo check --no-default-features        # shared library still builds no_std
 cargo run --release -- bake              # dist/talonhd.reu + output/{sheets,frames}/*.png, self-checked
 cargo run --release -- preview --t 150   # one demo frame through the model
 cargo run --release --example frame_stats -- dist/talonhd.reu 512   # DMAs / blends / I/O writes per frame
+```
+
+Bible and models:
+
+```sh
+python tools/bible.py check                 # base bible (forked from TALON)
+python tools/bible_hd.py check              # HD layer: palette law, ladder, ships, model blocks
+python tools/bible_hd.py export-prompts     # assets/prompts/hd/<id>.json (Ludo create-image + create + bake)
+python tools/model_prep.py <glb> assets/prompts/hd/<id>.json --forward z --up y   # -> assets/models/<id>.mesh
+python tools/model_prep.py <glb> --axes     # find the GLB's forward/up first
+cargo run --release -- bake-model assets/models/<id>.mesh --palette 6,12,1,3     # sheet + light share
 ```
 
 C64 (rust-mos + llvm-mos in WSL `Ubuntu-24.04`, paths in `scripts/env.sh`):
@@ -63,6 +77,13 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
 - **3D bake** (`src/raster3d.rs`, host): mesh + `Orient` (roll, pitch, yaw) + `View` → `SpriteImage`. 4×4
   supersampled z-buffer, one key light (`LIGHT`), per-face Lambert quantized in half steps along each
   material's code ramp (half step = sprite-space checkerboard), emissive materials. Units: 1 = one hires pixel.
-- **Tech scene** (`src/demo.rs`, shared, integer-only; `src/models.rs`, host): procedural stand-in meshes (not game
-  content) — a 512×512 flying fortress swaying and banking across the top of the screen, drones, the player's
-  fighter, a looping starfield/platform panorama.
+- **Models** (`src/mesh.rs`): `.mesh` text files from `tools/model_prep.py` (Ludo GLB → paint classes by
+  normalized luminance + chroma → QEM decimation to the bible's triangle count → model space, x right, y nose,
+  z up, hires px). Materials carry roles and an albedo from their paint.
+- **Tech scene** (`src/demo.rs`, shared, integer-only; `src/models.rs`, host): S1 palette; the Ludo TALON
+  (`assets/models/hd.ship.talon.mesh`) as the player's ship when present; procedural stand-ins (not game content)
+  for the 512×512 flying fortress, the drones and the panorama.
+- **Next:** the green hardware-sprite HUD (4+4 multiplexed hires sprites, damage flash white→red→green), then the
+  Ludo GANTRY QUEEN and the S1 roster, then the TALON simulation.
+- **Hardware quirk:** the first `c64u.py run` after a config change or a previous run sometimes leaves the machine
+  on garbage (status block full of `$55`). Run again, then `upload-reu`.

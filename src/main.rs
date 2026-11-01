@@ -4,6 +4,7 @@
 //! talonhd bake    [--out DIR]              tech-scene level image + previews, self-checked
 //! talonhd preview [--reu FILE] [--t N] [--out PNG]
 //! talonhd compare [--reu FILE] --dump DIR [--t N]
+//! talonhd bake-model <file.mesh> [--palette v,d,l,h] [--out PNG]   orientation sheet + light share
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -14,7 +15,7 @@ use talonhd::encode::SpriteImage;
 use talonhd::layout::{self, BUFFERS, status};
 use talonhd::model::{self, Machine};
 use talonhd::render::{self, Scroll};
-use talonhd::{demo, models, png, reference};
+use talonhd::{demo, mesh, models, png, reference};
 
 struct Args(Vec<String>);
 
@@ -41,6 +42,7 @@ fn main() -> ExitCode {
         "bake" => cmd_bake(&args),
         "preview" => cmd_preview(&args),
         "compare" => cmd_compare(&args),
+        "bake-model" => cmd_bake_model(&argv[1..]),
         other => Err(format!("unknown command {other}")),
     };
     match result {
@@ -87,7 +89,7 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
 
     let pano: Panorama = models::demo_panorama();
-    let frames = models::demo_frames();
+    let frames = models::demo_frames_with_assets();
     let pal = pano.palette;
     let groups = [
         ("boss", demo::BOSS_FRAME, demo::BOSS_BANKS),
@@ -213,4 +215,44 @@ fn cmd_compare(args: &Args) -> Result<(), String> {
     println!("t={t} front={} render={micros} us: {bad} mismatched bytes", st[status::FRONT as usize]);
     png::save_wide(&dump.join("model.png"), 160, &m.visible(front, img.palette.d021, scroll.fine))?;
     if bad == 0 { Ok(()) } else { Err(format!("{bad} bytes differ")) }
+}
+
+/// Render a prepared model at every declared orientation into a sheet, in a stage palette.
+fn cmd_bake_model(argv: &[String]) -> Result<(), String> {
+    let path = argv.first().filter(|a| !a.starts_with("--")).ok_or("usage: bake-model <file.mesh> [--palette v,d,l,h] [--out PNG]")?;
+    let args = Args(argv[1..].to_vec());
+    let pal: Vec<u8> = args
+        .opt("--palette")
+        .unwrap_or("6,12,1,3")
+        .split(',')
+        .map(|c| c.trim().parse::<u8>().map_err(|_| format!("--palette: bad color {c}")))
+        .collect::<Result<_, _>>()?;
+    if pal.len() != 4 {
+        return Err("--palette needs four colors: void,dark,light,hot".into());
+    }
+    let palette = render::Palette::new(pal[0], pal[1], pal[2], pal[3]);
+    let model = mesh::load(Path::new(path))?;
+    let frames = model.render_all();
+    let default_out = format!("output/models/{}.png", model.name);
+    let out = PathBuf::from(args.opt("--out").unwrap_or(&default_out));
+    let (w, px) = sheet(&frames, palette);
+    png::save_wide(&out, w, &px)?;
+    let bytes: usize = frames.iter().map(bake::frame_bytes).sum();
+    let share = frames.iter().map(mesh::code_share).fold([0.0; 4], |a, s| [a[0] + s[0], a[1] + s[1], a[2] + s[2], a[3] + s[3]]);
+    let n = frames.len() as f64;
+    println!(
+        "{}: {} tris, {} frames {}x{}, {} REU bytes; code share void {:.0}% dark {:.0}% light {:.0}% hot {:.0}%",
+        model.name,
+        model.mesh.tris.len(),
+        frames.len(),
+        model.canvas.0,
+        model.canvas.1,
+        bytes,
+        share[0] / n * 100.0,
+        share[1] / n * 100.0,
+        share[2] / n * 100.0,
+        share[3] / n * 100.0
+    );
+    println!("wrote {}", out.display());
+    Ok(())
 }

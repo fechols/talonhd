@@ -1,0 +1,70 @@
+{
+  "id": "hd.ship.peregrine",
+  "create_image": {
+    "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: a slim long-range interceptor in cream and terracotta, a needle nose, cranked delta wings, a long dorsal spine, one big round exhaust. Shape: needle nose, cranked delta with a sharp kink at half span, dorsal spine ridge, single large round nozzle, small wingtip fins. Paint: cream ceramic armour, terracotta wing panels, dark seams, light blue canopy glass, cyan exhaust glow. Parts painted distinctly: hull: cream ceramic armour; panels: terracotta wing panels; canopy: light blue canopy glass; glow: cyan exhaust glow. Only the object. No text, no markings, no pilot, no people, no base or stand."
+  },
+  "create": {
+    "model": "hero",
+    "texture_type": "simple",
+    "texture_size": 2048,
+    "target_num_faces": 1440,
+    "rig": false
+  },
+  "bake": {
+    "size_class": "M",
+    "canvas": [
+      32,
+      72
+    ],
+    "length_px": 70,
+    "tris": 180,
+    "orient": {
+      "roll": 9,
+      "roll_max_deg": 60
+    },
+    "materials": [
+      {
+        "name": "hull",
+        "source": "cream ceramic armour",
+        "ramp": [
+          "void",
+          "dark",
+          "light"
+        ],
+        "floor": 2,
+        "emissive": false
+      },
+      {
+        "name": "panels",
+        "source": "terracotta wing panels",
+        "ramp": [
+          "void",
+          "dark",
+          "light"
+        ],
+        "floor": 2,
+        "emissive": false
+      },
+      {
+        "name": "canopy",
+        "source": "light blue canopy glass",
+        "ramp": [
+          "dark",
+          "light",
+          "hot"
+        ],
+        "floor": 1,
+        "emissive": false
+      },
+      {
+        "name": "glow",
+        "source": "cyan exhaust glow",
+        "ramp": [
+          "hot"
+        ],
+        "floor": 0,
+        "emissive": true
+      }
+    ]
+  }
+}

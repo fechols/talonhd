@@ -1,0 +1,70 @@
+{
+  "id": "hd.ship.augur",
+  "create_image": {
+    "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: an armoured siege fighter in stone and olive, a broad flying wedge, a raised sensor spine, four square engine nozzles across the rear edge. Shape: flat broad wedge, raised sensor spine with a disc at its peak, four square nozzles in a row, short clipped wingtips. Paint: light stone armour plates, olive panels, dark seams, light blue canopy glass, cyan exhaust glow. Parts painted distinctly: hull: light stone armour plates; panels: olive panels; canopy: light blue canopy glass; glow: cyan exhaust glow. Only the object. No text, no markings, no pilot, no people, no base or stand."
+  },
+  "create": {
+    "model": "hero",
+    "texture_type": "simple",
+    "texture_size": 2048,
+    "target_num_faces": 1760,
+    "rig": false
+  },
+  "bake": {
+    "size_class": "M",
+    "canvas": [
+      48,
+      60
+    ],
+    "length_px": 58,
+    "tris": 220,
+    "orient": {
+      "roll": 9,
+      "roll_max_deg": 60
+    },
+    "materials": [
+      {
+        "name": "hull",
+        "source": "light stone armour plates",
+        "ramp": [
+          "void",
+          "dark",
+          "light"
+        ],
+        "floor": 2,
+        "emissive": false
+      },
+      {
+        "name": "panels",
+        "source": "olive panels",
+        "ramp": [
+          "void",
+          "dark",
+          "light"
+        ],
+        "floor": 2,
+        "emissive": false
+      },
+      {
+        "name": "canopy",
+        "source": "light blue canopy glass",
+        "ramp": [
+          "dark",
+          "light",
+          "hot"
+        ],
+        "floor": 1,
+        "emissive": false
+      },
+      {
+        "name": "glow",
+        "source": "cyan exhaust glow",
+        "ramp": [
+          "hot"
+        ],
+        "floor": 0,
+        "emissive": true
+      }
+    ]
+  }
+}

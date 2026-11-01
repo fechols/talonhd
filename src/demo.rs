@@ -20,7 +20,7 @@ pub const BOSS_SIZE: u16 = 512;
 pub const DRONE_W: u16 = 40;
 pub const DRONE_H: u16 = 40;
 pub const PLAYER_W: u16 = 36;
-pub const PLAYER_H: u16 = 56;
+pub const PLAYER_H: u16 = 66;
 
 /// Lines in one period of the looping panorama (the image has 200 more, a
 /// copy of the first 200, so every window is contiguous).
@@ -83,7 +83,7 @@ pub fn scene(t: u16, out: &mut [Sprite; INSTANCES]) -> usize {
     out[n] = Sprite {
         frame: PLAYER_FRAME + bank(icos(p), PLAYER_BANKS),
         x: 80 + isin(p) * 50 / 127 - PLAYER_W as i16 / 2,
-        y: 132,
+        y: 122,
         z: 2,
     };
     n += 1;

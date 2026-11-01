@@ -18,8 +18,11 @@ pub const DARK: u8 = 1;
 pub const LIGHT: u8 = 2;
 pub const HOT: u8 = 3;
 
-/// Tech-scene palette: black void, blue / light blue hulls, yellow hot.
-pub const DEMO_PALETTE: Palette = Palette::new(0, 6, 14, 7);
+/// Tech-scene palette: S1 BREAKWATER (docs/story/hd/02-ladder.md): blue sea, mid grey, white, cyan.
+pub const DEMO_PALETTE: Palette = Palette::new(6, 12, 1, 3);
+
+/// The approved S1 ship, if its prepared model exists (`tools/model_prep.py`).
+pub const TALON_MESH: &str = "assets/models/hd.ship.talon.mesh";
 
 /// The player's stand-in fighter: nose +y, about 64 long, 60 across.
 pub fn fighter() -> Mesh {
@@ -83,9 +86,10 @@ pub fn drone() -> Mesh {
 /// nose +y. Hull ridge, stepped swept wings, nacelles, turrets and cores.
 pub fn fortress() -> Mesh {
     let mut m = Mesh::new(vec![
-        Material::lit(&[VOID, DARK, LIGHT], 1.0, 1),  // plating
-        Material::lit(&[VOID, DARK, LIGHT], 0.62, 1), // dark armour
-        Material::lit(&[VOID, DARK, HOT], 1.0, 1),    // turrets
+        // Enemies are dark and hot; light belongs to the player (palette law).
+        Material::lit(&[VOID, DARK], 1.0, 1),       // plating
+        Material::lit(&[VOID, DARK], 0.7, 1),       // dark armour
+        Material::lit(&[VOID, DARK, HOT], 0.9, 1),  // turrets
         Material::glow(HOT),                          // cores and exhausts
         Material::glow(LIGHT),                        // running lights
     ]);
@@ -144,7 +148,20 @@ fn banks(n: u16, max: f64) -> impl Iterator<Item = f64> {
     (0..n).map(move |i| (i as f64 / (n - 1) as f64 * 2.0 - 1.0) * max)
 }
 
-/// Every sprite frame of the tech scene, in [`demo`] directory order.
+/// The tech scene with the Ludo TALON as the player's ship when its mesh is present.
+pub fn demo_frames_with_assets() -> Vec<SpriteImage> {
+    let mut frames = demo_frames();
+    if let Ok(m) = crate::mesh::load(std::path::Path::new(TALON_MESH)) {
+        let view = View::centered(demo::PLAYER_W, demo::PLAYER_H, 1.0);
+        let max = m.orient.get("roll_max_deg").copied().unwrap_or(60.0).to_radians();
+        for (i, roll) in banks(demo::PLAYER_BANKS, max).enumerate() {
+            frames[(demo::PLAYER_FRAME as usize) + i] = raster3d::render(&m.mesh, Orient { yaw: 0.0, pitch: 0.0, roll }, view);
+        }
+    }
+    frames
+}
+
+/// Every sprite frame of the tech scene (procedural stand-ins only), in [`demo`] directory order.
 pub fn demo_frames() -> Vec<SpriteImage> {
     let mut out = Vec::new();
     let boss = fortress();
@@ -170,7 +187,9 @@ pub fn demo_frames() -> Vec<SpriteImage> {
 
 /// A ground structure for the panorama: a platform of stepped blocks.
 fn platform(seed: u32) -> Mesh {
-    let mut m = Mesh::new(vec![Material::lit(&[VOID, DARK], 0.55, 0), Material::lit(&[VOID, DARK], 0.9, 0)]);
+    // The background sits one step down: platforms are only ever the void/dark checker (or void), so
+    // solid dark always means the play layer.
+    let mut m = Mesh::new(vec![Material::lit(&[VOID, DARK], 0.42, 0), Material::lit(&[VOID, DARK], 0.6, 0)]);
     let mut rng = seed;
     let mut next = move || {
         rng ^= rng << 13;

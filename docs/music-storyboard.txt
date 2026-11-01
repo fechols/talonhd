@@ -1,0 +1,433 @@
+TALON - MUSIC STORYBOARD AND SUNO PROMPTS
+=========================================
+
+How to use this file with Suno (method from pummel's docs/suno-prompting-notes.md)
+-------------------------------------------------------------------------------
+- Custom mode. Instrumental toggle ON for every cue.
+- Paste the STYLES block into "Styles" (each is under 1,000 characters) and the LYRICS block into
+  "Lyrics". The first lyrics line is always [Instrumental]; the rest are structure tags only.
+- Paste the EXCLUDE line into "Exclude Styles" (Advanced).
+- Style Influence high / Variety 0; Weirdness 30-40%. Max Mode for anything over two minutes.
+- Generate 2-4 takes and keep the best.
+  LOOP cues: pick the steadiest cycle, cut on a bar boundary at zero crossings with a 5-20 ms
+  crossfade, export WAV.
+  ONE-SHOT cues: Suno tends to overshoot jingles; Crop to the phrase.
+- Delivery for the C64 Ultimate: 16 kHz mono DLT5 after encoding. Keep mixes punchy with a clear bass
+  line and sparse high end; the sampler path has no room for washy reverb tails.
+- File naming for drop-in: assets/music/<cue id>.wav (e.g. assets/music/cue.stage_s1.wav). Keep the
+  original Suno download too; it is the byte-exact source.
+
+The TALON sound (base style, reused in every cue so the soundtrack hangs together)
+-----------------------------------------------------------------------------------
+Mid-1980s arcade shooter soundtrack played as energetic synth-rock: FM-synth brass and bell leads,
+driving analog synth bass, gated-reverb drums, rock guitar power chords, bright punchy mix, constant
+tempo. Heroic and bright, never grim. Every theme carries the "talon call": a rising three-note brass
+motif (root, fifth, octave), so the player hears the ship in every stage.
+
+Cue table
+---------
+  cue.title          Title / attract ("CLEAR SKIES")             1:30, real ending
+  cue.briefing       Stage card                                   0:12 one-shot
+  cue.stage_s1       S1 BREAKWATER                                2:30 loop
+  cue.stage_s2       S2 TERRACES                                  2:30 loop
+  cue.stage_s3       S3 REDLINE                                   2:30 loop
+  cue.stage_s4       S4 SLUICEWORKS                               2:30 loop
+  cue.stage_s5       S5 BASTION                                   2:30 loop
+  cue.stage_s6       S6 VERDIGRIS                                 2:30 loop
+  cue.stage_s7       S7 STORMFRONT                                2:30 loop
+  cue.stage_s8       S8 SKYHOOK                                   2:30 loop
+  cue.midboss        Midboss alarm (shared)                       1:00 loop
+  cue.boss           Stage boss "LATTICE GUARDIAN" (S1-S7)        1:30 loop
+  cue.final_1        CROWN, the Ring                              1:30 loop
+  cue.final_2        CROWN, the Heart                             1:30 loop
+  cue.overdrive      OVERDRIVE sting (over ducked music)          0:10 one-shot
+  cue.stage_clear    Stage clear                                  0:10 one-shot
+  cue.game_over      Game over                                    3:25 as recorded, real ending (LOCKED)
+  cue.name_entry     High-score entry                             1:00 loop
+  cue.ending         Ending + credits ("THE SKY IS OURS AGAIN")   2:30, real ending
+
+Exclude Styles sets
+-------------------
+  LOOP:     vocals, singing, choir, humming, slow ending, fade out
+  ENDING:   vocals, singing, choir, humming
+
+====================================================================================================
+cue.title  -  "CLEAR SKIES" (title / attract)
+====================================================================================================
+Mood: an arcade cabinet lighting up in a dark room; a fighter rolling out onto a sunlit runway. Bold,
+bright, a hook you hum after one listen. Real intro and real ending; the title screen does not loop
+this, it falls to the attract demo. 1:30.
+
+STYLES:
+mid-1980s arcade shooter title theme, energetic synth-rock, 150 BPM, heroic and bright, FM-synth brass
+fanfare with a rising three-note call, driving analog synth bass, rock guitar power chords,
+gated-reverb drums with big tom fills, sparkling bell arpeggios, punchy clean mix, strong intro,
+triumphant final chord
+
+LYRICS:
+[Instrumental]
+[Intro: tom fill and brass fanfare, rising three-note call, 4 bars]
+[Main Theme: bright synth-brass melody over power chords, 16 bars]
+[Instrumental Bridge: bass and drums drive, bell arpeggios build, 8 bars]
+[Main Theme: full band, key up one step, 16 bars]
+[Outro: fanfare call, final chord]
+[End]
+
+EXCLUDE: vocals, singing, choir, humming
+
+====================================================================================================
+cue.briefing  -  Stage card
+====================================================================================================
+Mood: Marshal Brandt's one-line brief on the stage card; engines spooling up. 12 seconds.
+
+STYLES:
+mid-1980s arcade shooter stage-start jingle, 12 seconds, crisp military snare roll, FM-synth brass
+rising three-note call, synth bass pulse, determined and ready, short and punchy, ends on a held chord
+
+LYRICS:
+[Instrumental]
+[Intro: snare roll, 1 bar]
+[Fanfare: rising brass call, 2 bars]
+[End]
+
+EXCLUDE: vocals, singing, choir, humming
+
+====================================================================================================
+Stage cues (one per stage)
+====================================================================================================
+Each stage theme is 2:30, loop-friendly (constant tempo, no intro, no outro, no fade-out), with an
+A-B-A plan whose B section is the stage's middle section heard through the same groove.
+
+----------------------------------------------------------------------------------------------------
+cue.stage_s1  -  BREAKWATER  (open sea -> docks -> airfield at dawn)
+----------------------------------------------------------------------------------------------------
+Mood: launch-morning optimism, salt spray and jet noise. Open over the sea, punchier over the docks,
+the full hook as the runway is retaken. "That's our runway they're standing on, Captain."
+
+STYLES:
+mid-1980s arcade shooter stage theme, energetic synth-rock, 152 BPM, constant tempo, bright and
+optimistic, galloping analog synth bass, FM-synth brass lead with a rising three-note call, shimmering
+bell arpeggios like sunlight on water, gated-reverb drums, rock guitar power chords on the chorus,
+punchy clean mix, steady groove, loop-friendly, no intro, no outro, no fade-out
+
+LYRICS:
+[Instrumental]
+[Main Theme: brass lead over galloping bass, open sea, 16 bars]
+[B Section: tighter staccato brass stabs, dockside, 8 bars]
+[Main Theme: full band with power chords, airfield, 16 bars]
+
+EXCLUDE: vocals, singing, choir, humming, slow ending, fade out
+
+----------------------------------------------------------------------------------------------------
+cue.stage_s2  -  TERRACES  (vineyards -> hill village -> observatory)
+----------------------------------------------------------------------------------------------------
+Mood: warm golden afternoon over rolling hills, brisk and sunny; a quieter plucked village bridge
+before the brass returns at the crystal-choked observatory.
+
+STYLES:
+mid-1980s arcade shooter stage theme, sunny synth-pop rock, 140 BPM, constant tempo, warm and brisk,
+bright plucked FM-synth melody like a mandolin, bouncing synth bass, FM-synth brass answers, light
+gated drums with shaker, rising three-note brass call, warm analog pad, punchy clean mix, steady
+groove, loop-friendly, no intro, no outro, no fade-out
+
+LYRICS:
+[Instrumental]
+[Main Theme: plucked melody over bouncing bass, vineyards, 16 bars]
+[B Section: pad and pluck alone, drums lighter, hill village, 8 bars]
+[Main Theme: brass doubles the melody, full drums, observatory, 16 bars]
+
+EXCLUDE: vocals, singing, choir, humming, slow ending, fade out
+
+----------------------------------------------------------------------------------------------------
+cue.stage_s3  -  REDLINE  (open desert -> mesa canyon -> freight yard)
+----------------------------------------------------------------------------------------------------
+Mood: hard sun and steel rails; dusty, relentless locomotive drive; a shadowed canyon section, then the
+full charge into the freight yard.
+
+STYLES:
+mid-1980s arcade shooter stage theme, desert synth-rock, 146 BPM, constant tempo, driving and gritty,
+chugging train-rhythm synth bass and palm-muted guitar, twangy lead guitar phrases, FM-synth brass
+stabs, gated-reverb drums with shuffle hi-hats, rising three-note brass call, punchy dry mix, steady
+groove, loop-friendly, no intro, no outro, no fade-out
+
+LYRICS:
+[Instrumental]
+[Main Theme: chugging bass and twang lead, open desert, 16 bars]
+[Breakdown: low toms and muted guitar, canyon shadow, 8 bars]
+[Main Theme: brass and guitar together, full charge, freight yard, 16 bars]
+
+EXCLUDE: vocals, singing, choir, humming, slow ending, fade out
+
+----------------------------------------------------------------------------------------------------
+cue.stage_s4  -  SLUICEWORKS  (pipe yards -> canal locks -> pump hall)
+----------------------------------------------------------------------------------------------------
+Mood: pressurised machinery, syncopated pistons, cool blue water; a sleek melody gliding above the
+clank.
+
+STYLES:
+mid-1980s arcade shooter stage theme, industrial synth-funk, 132 BPM, constant tempo, cool and
+mechanical, syncopated slap-style synth bass, metallic clanking percussion like pistons, hissing noise
+hi-hats, sleek FM-synth bell lead, FM-synth brass stabs, rising three-note call, gated-reverb snare,
+punchy clean mix, steady groove, loop-friendly, no intro, no outro, no fade-out
+
+LYRICS:
+[Instrumental]
+[Main Theme: bell lead over syncopated bass and piston percussion, 16 bars]
+[B Section: filtered bass, water-drip arpeggios, canal locks, 8 bars]
+[Main Theme: brass stabs join, full drive, pump hall, 16 bars]
+
+EXCLUDE: vocals, singing, choir, humming, slow ending, fade out
+
+----------------------------------------------------------------------------------------------------
+cue.stage_s5  -  BASTION  (moat -> great walls -> four domes)
+----------------------------------------------------------------------------------------------------
+Mood: the siege. Heavy, martial, determined; marching drums under stone walls, rising toward the
+mid-game revelation (the call turns major at the end).
+
+STYLES:
+mid-1980s arcade shooter stage theme, martial synth-rock, 128 BPM, constant tempo, heavy and
+determined, marching snare and deep gated-reverb toms, thick low synth-bass ostinato, minor-key
+FM-synth brass melody, distorted guitar power chords, rising three-note call turning to major, punchy
+wide mix, steady groove, loop-friendly, no intro, no outro, no fade-out
+
+LYRICS:
+[Instrumental]
+[Main Theme: minor brass over marching drums, the walls, 16 bars]
+[Breakdown: toms and bass ostinato alone, siege tension, 8 bars]
+[Main Theme: guitar and brass, call turns major, the domes, 16 bars]
+
+EXCLUDE: vocals, singing, choir, humming, slow ending, fade out
+
+----------------------------------------------------------------------------------------------------
+cue.stage_s6  -  VERDIGRIS  (jungle canopy -> temple ruins -> launch apron)
+----------------------------------------------------------------------------------------------------
+Mood: humid, lush, mysterious; crystal flowers glowing in green shade; heroic again at the rusted
+launch gantry.
+
+STYLES:
+mid-1980s arcade shooter stage theme, lush jungle synth-rock, 136 BPM, constant tempo, mysterious and
+lush, marimba-like FM-synth ostinato, rolling electronic hand-drum percussion, warm analog pad, deep
+synth bass, glassy bell lead, FM-synth brass three-note call, gated snare on two and four, punchy
+clean mix, steady groove, loop-friendly, no intro, no outro, no fade-out
+
+LYRICS:
+[Instrumental]
+[Main Theme: marimba ostinato and glassy lead over rolling drums, 16 bars]
+[B Section: pad and percussion, distant bell, temple ruins, 8 bars]
+[Main Theme: brass call returns, full drums, launch apron, 16 bars]
+
+EXCLUDE: vocals, singing, choir, humming, slow ending, fade out
+
+----------------------------------------------------------------------------------------------------
+cue.stage_s7  -  STORMFRONT  (cloud deck -> storm cell -> the sky fleet)
+----------------------------------------------------------------------------------------------------
+Mood: the high-altitude dogfight; the fastest theme in the game, thunder in the drums, a desperate
+climb above the storm onto the decks of the enemy fleet.
+
+STYLES:
+mid-1980s arcade shooter stage theme, high-speed synth-rock, 164 BPM, constant tempo, soaring and
+urgent, racing sixteenth-note synth bass, screaming FM-synth brass lead, rock guitar power chords,
+thunderous gated-reverb tom fills, string-like synth pads for altitude, rising three-note brass call,
+punchy wide mix, steady groove, loop-friendly, no intro, no outro, no fade-out
+
+LYRICS:
+[Instrumental]
+[Main Theme: racing bass and soaring brass lead, cloud deck, 16 bars]
+[B Section: thunder toms and darker chords, storm cell, 8 bars]
+[Main Theme: guitar and brass full drive, the fleet, 16 bars]
+
+EXCLUDE: vocals, singing, choir, humming, slow ending, fade out
+
+----------------------------------------------------------------------------------------------------
+cue.stage_s8  -  SKYHOOK  (upper atmosphere -> orbit -> crown approach)
+----------------------------------------------------------------------------------------------------
+Mood: climbing the elevator cable out of the sky into silence and stars; awe first, then resolve
+building to the hero's peak.
+
+STYLES:
+mid-1980s arcade shooter stage theme, cosmic synth-rock, 144 BPM, constant tempo, awed then resolute,
+pulsing arpeggiated analog synth bass, wide shimmering synth pads, crystalline bell lead, FM-synth
+brass three-note call growing stronger, gated-reverb drums, rock guitar power chords in the final
+section, punchy wide mix, steady groove, loop-friendly, no intro, no outro, no fade-out
+
+LYRICS:
+[Instrumental]
+[Main Theme: arpeggio pulse and crystal bell lead, atmosphere, 16 bars]
+[B Section: pads open wide, sparse drums, orbit and stars, 8 bars]
+[Main Theme: brass call and guitar, full drive, crown approach, 16 bars]
+
+EXCLUDE: vocals, singing, choir, humming, slow ending, fade out
+
+====================================================================================================
+cue.midboss  -  Alarm (shared midboss)
+====================================================================================================
+Mood: klaxons; something big just arrived mid-stage. Short, tense loop. 1:00.
+
+STYLES:
+mid-1980s arcade shooter mini-boss theme, tense synth-rock, 156 BPM, constant tempo, urgent and
+alarmed, two-note klaxon synth lead, driving eighth-note synth bass, minor FM-synth brass stabs,
+gated-reverb drums with double-time hi-hats, punchy clean mix, loop-friendly, no intro, no outro, no
+fade-out
+
+LYRICS:
+[Instrumental]
+[Main Theme: klaxon lead over driving bass, 8 bars]
+[B Section: brass stabs and drum fills, 8 bars]
+
+EXCLUDE: vocals, singing, choir, humming, slow ending, fade out
+
+====================================================================================================
+cue.boss  -  "LATTICE GUARDIAN" (shared stage boss, S1-S7)
+====================================================================================================
+Mood: cold alien geometry versus a lone fighter; relentless, menacing, glassy. Shared by every stage
+boss so the player learns "this music means a guardian". 1:30, loops.
+
+STYLES:
+mid-1980s arcade shooter boss battle theme, dark synth-rock, 168 BPM, constant tempo, relentless and
+menacing, driving low synth-bass ostinato, glassy dissonant FM-synth bell stabs, minor-key brass riff,
+distorted guitar, gated-reverb drums with double-time hi-hats, timpani hits, punchy cinematic mix,
+loop-friendly, no intro, no outro, no fade-out
+
+LYRICS:
+[Instrumental]
+[Main Theme: bell stabs and brass riff over bass ostinato, 16 bars]
+[Breakdown: half-time drums, timpani and low pulse, 8 bars]
+[Main Theme: guitar doubles the riff, full drive, 16 bars]
+
+EXCLUDE: vocals, singing, choir, humming, slow ending, fade out
+
+====================================================================================================
+cue.final_1  -  CROWN, the Ring
+====================================================================================================
+Mood: a crystal cathedral in orbit; vast, cold, regal. The boss theme's DNA slowed and widened into a
+march. Loops.
+
+STYLES:
+mid-1980s arcade shooter final boss theme, epic synth-rock march, 132 BPM, constant tempo, vast and
+regal menace, heavy synth-bass march, glassy crystalline bell chords, organ-like synth chords,
+minor-key FM-synth brass fanfare, rock guitar power chords, timpani and snare rolls, wide punchy mix,
+loop-friendly, no intro, no outro, no fade-out
+
+LYRICS:
+[Instrumental]
+[Main Theme: brass fanfare over the march, crystal bells, 16 bars]
+[B Section: organ chords and timpani, guitar enters, 8 bars]
+[Main Theme: full fanfare with drums, 16 bars]
+
+EXCLUDE: vocals, singing, choir, humming, slow ending, fade out
+
+====================================================================================================
+cue.final_2  -  CROWN, the Heart
+====================================================================================================
+Mood: the ring shatters; what remains is fast, desperate and personal. The talon call fights its way
+through the dissonance and wins. Loops.
+
+STYLES:
+mid-1980s arcade shooter final boss second form, frantic synth-rock, 172 BPM, constant tempo,
+desperate then heroic, racing synth bass, dissonant glassy bell arpeggios, distorted guitar riff,
+heroic FM-synth brass rising three-note call breaking through in the second half, gated-reverb drums
+with relentless hi-hats, punchy mix, loop-friendly, no intro, no outro, no fade-out
+
+LYRICS:
+[Instrumental]
+[Main Theme: dissonant arpeggios and racing bass, 16 bars]
+[B Section: guitar riff and toms, tension peaks, 8 bars]
+[Main Theme: heroic brass call cuts through, full band, 16 bars]
+
+EXCLUDE: vocals, singing, choir, humming, slow ending, fade out
+
+====================================================================================================
+cue.overdrive  -  OVERDRIVE sting
+====================================================================================================
+Mood: the four wing pods become escort fighters; every gun doubles. Plays over the ducked stage music.
+
+STYLES:
+mid-1980s arcade shooter power-up sting, 10 seconds, explosive gated-reverb drum hit, screaming
+FM-synth brass rising three-note call, fast upward synth arpeggio, rock guitar power chord,
+triumphant, short and punchy, ends on a clean held chord
+
+LYRICS:
+[Instrumental]
+[Fanfare: rising call and arpeggio, 3 bars]
+[End]
+
+EXCLUDE: vocals, singing, choir, humming
+
+====================================================================================================
+cue.stage_clear  -  Stage clear
+====================================================================================================
+STYLES:
+mid-1980s arcade shooter stage clear jingle, 10 seconds, warm victorious FM-synth brass phrase quoting
+a rising three-note call, synth bass fill, gated drum fill, bright and relieved, ends on a held major
+chord
+
+LYRICS:
+[Instrumental]
+[Fanfare: brass phrase answered by bass fill, 4 bars]
+[End]
+
+EXCLUDE: vocals, singing, choir, humming
+
+====================================================================================================
+cue.game_over  -  Game over
+====================================================================================================
+LOCKED (2026-10-30): the user's chosen recording (assets/music/cue.game_over.m4a, 3:25) is used exactly
+as recorded. Do not crop, trim, loop-edit or regenerate it. The brief below is kept for the record.
+
+Mood: the TALON is down; the hangar is quiet. Somber, then one small lift so CONTINUE feels like the
+right choice. 0:40 with a real ending.
+
+STYLES:
+somber mid-1980s arcade shooter game over theme, 76 BPM, slow and reflective, descending minor melody
+on muted FM-synth brass, soft analog pad, sparse electric piano, slow synth bass, light gated snare,
+one hopeful major chord at the very end, clean mix, ends on a held note
+
+LYRICS:
+[Instrumental]
+[Main Theme: descending brass over pad, 8 bars]
+[Outro: electric piano alone, resolves to one hopeful major chord]
+[End]
+
+EXCLUDE: vocals, singing, choir, humming
+
+====================================================================================================
+cue.name_entry  -  High-score entry
+====================================================================================================
+Mood: proud and easygoing; three letters on the board. Loops.
+
+STYLES:
+mid-1980s arcade high score entry theme, relaxed synth-pop, 112 BPM, constant tempo, proud and
+easygoing, bouncy synth bass, bright FM-synth bell melody, soft brass pads, gated snare, punchy clean
+mix, loop-friendly, no intro, no outro, no fade-out
+
+LYRICS:
+[Instrumental]
+[Main Theme: bell melody over bouncy bass, 16 bars]
+[B Section: brass pads answer, 8 bars]
+
+EXCLUDE: vocals, singing, choir, humming, slow ending, fade out
+
+====================================================================================================
+cue.ending  -  "THE SKY IS OURS AGAIN" (ending and credits)
+====================================================================================================
+Mood: the crystal goes dark across the world; dawn over the carrier; the airbase flag goes back up.
+Warm, proud, wide open, a little tearful, then a confident reprise of the title hook for the credits.
+2:30 with a real ending.
+
+STYLES:
+mid-1980s arcade shooter ending and credits theme, synth-rock ballad building to anthem, 108 BPM, warm
+and triumphant, gentle opening with analog pad and electric piano, slow build adding synth bass and
+gated drums, soaring FM-synth brass reprise of a rising three-note heroic hook, rock guitar power
+chords in the final section, wide punchy mix, big final chord with long sustain
+
+LYRICS:
+[Instrumental]
+[Intro: electric piano and pad, dawn light, 8 bars]
+[Build: synth bass and gated drums enter, 8 bars]
+[Main Theme: soaring brass hook, full band, 16 bars]
+[Instrumental Bridge: quiet reprise on electric piano, 8 bars]
+[Main Theme: brass and guitar together, key up one step, 16 bars]
+[Outro: final chord, long sustain]
+[End]
+
+EXCLUDE: vocals, singing, choir, humming

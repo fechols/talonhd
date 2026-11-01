@@ -7,7 +7,7 @@
 //! - **Faceted:** one intensity per face (Lambert on the face normal).
 //! - **Ramps:** each material shades through an ordered list of codes, dark →
 //!   light. Intensity is quantized in half steps: a whole step is a solid
-//!   code, a half step a 50 % checkerboard of two neighbours. The checker is
+//!   code, a half step (the middle 40 % between two codes) a 50 % checkerboard. The checker is
 //!   anchored in sprite space, so it moves with the ship and never crawls.
 //! - **Emissive** materials (cores, engines, shots) ignore the light.
 //!
@@ -163,9 +163,17 @@ fn shade(m: &Material, normal: V3) -> (u8, u8) {
         let c = *m.ramp.last().unwrap();
         return (c, c);
     }
-    let lit = (AMBIENT + (1.0 - AMBIENT) * dot(normal, normalize(LIGHT)).max(0.0)) * m.albedo;
-    let steps = 2 * (n - 1);
-    let q = ((lit.clamp(0.0, 1.0) * steps as f64).round() as usize).clamp(m.floor as usize, steps);
+    // Normalized so a face pointing straight up (at the viewer) is fully lit: flat tops read as
+    // solid light and only faces turned away from the key light step down the ramp.
+    let l = normalize(LIGHT);
+    let lambert = (dot(normal, l) / l[2]).clamp(0.0, 1.0);
+    let lit = (AMBIENT + (1.0 - AMBIENT) * lambert) * m.albedo;
+    // Position along the ramp; the checker covers only the middle 40 % of each step, so most faces
+    // are solid and a checker always means a real mid-tone.
+    let t = lit.clamp(0.0, 1.0) * (n - 1) as f64;
+    let (i, f) = (t.floor() as usize, t.fract());
+    let q = if i >= n - 1 { 2 * (n - 1) } else if f < 0.3 { 2 * i } else if f > 0.7 { 2 * i + 2 } else { 2 * i + 1 };
+    let q = q.clamp(m.floor as usize, 2 * (n - 1));
     (m.ramp[q / 2], m.ramp[q.div_ceil(2)])
 }
 

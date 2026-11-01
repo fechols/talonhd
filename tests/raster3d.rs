@@ -63,12 +63,12 @@ fn demo_frames_golden() {
 }
 
 const GOLDEN: [u64; 8] = [
-    0x56b823bd51b3a02d,
-    0x97bea876a57b821b,
-    0xe517a8f518efda40,
-    0x4a8c93c640ddbf62,
-    0x275fd591944b3a7f,
-    0xdf0c465656442c61,
-    0xe0629061ec9aca3a,
-    0x283773eb3fe22395,
+    0x584f1f432feeca72,
+    0x27a99ab3b33d53b7,
+    0x49c615524082ab8d,
+    0x395f69300f06d2f6,
+    0x932f66f83ab55db2,
+    0x72d55191aae5e8f0,
+    0x52695fae871540a2,
+    0x3da06e5ed13076e8,
 ];

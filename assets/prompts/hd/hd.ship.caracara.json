@@ -1,0 +1,70 @@
+{
+  "id": "hd.ship.caracara",
+  "create_image": {
+    "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: a heavy twin-boom ground-attack craft in yellow and orange, a broad straight wing, a central armoured pod, two tail booms joined by a tailplane. Shape: short blunt central pod, broad straight wing, two parallel tail booms, a crossbar tailplane, two engine pods on the booms. Paint: yellow armour, orange booms and wing panels, dark seams, light blue canopy glass, cyan exhaust glow. Parts painted distinctly: hull: yellow armour; booms: orange booms and wing panels; canopy: light blue canopy glass; glow: cyan exhaust glow. Only the object. No text, no markings, no pilot, no people, no base or stand."
+  },
+  "create": {
+    "model": "hero",
+    "texture_type": "simple",
+    "texture_size": 2048,
+    "target_num_faces": 1760,
+    "rig": false
+  },
+  "bake": {
+    "size_class": "M",
+    "canvas": [
+      52,
+      58
+    ],
+    "length_px": 56,
+    "tris": 220,
+    "orient": {
+      "roll": 9,
+      "roll_max_deg": 60
+    },
+    "materials": [
+      {
+        "name": "hull",
+        "source": "yellow armour",
+        "ramp": [
+          "void",
+          "dark",
+          "light"
+        ],
+        "floor": 2,
+        "emissive": false
+      },
+      {
+        "name": "booms",
+        "source": "orange booms and wing panels",
+        "ramp": [
+          "void",
+          "dark",
+          "light"
+        ],
+        "floor": 2,
+        "emissive": false
+      },
+      {
+        "name": "canopy",
+        "source": "light blue canopy glass",
+        "ramp": [
+          "dark",
+          "light",
+          "hot"
+        ],
+        "floor": 1,
+        "emissive": false
+      },
+      {
+        "name": "glow",
+        "source": "cyan exhaust glow",
+        "ramp": [
+          "hot"
+        ],
+        "floor": 0,
+        "emissive": true
+      }
+    ]
+  }
+}

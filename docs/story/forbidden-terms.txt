@@ -1,0 +1,46 @@
+# One term per line, case-insensitive substring match. Comments start with #.
+# The reference game and its makers: inspiration only, never in content or prompts.
+alcon
+a.l.c.o.n
+slap fight
+slapfight
+toaplan
+taito
+sw475
+sw-475
+allied league
+cosmic nations
+# Other vertical-shooter franchises
+xevious
+solvalou
+andor genesis
+1942
+1943
+twin cobra
+tiger-heli
+flying shark
+truxton
+tatsujin
+raiden
+gradius
+vic viper
+salamander
+r-type
+r-9
+bydo
+zanac
+star soldier
+terra cresta
+galaga
+galaxian
+space invaders
+star force
+batsugun
+dodonpachi
+donpachi
+ikaruga
+# Generic film/TV terms that would read as references
+top gun
+maverick
+skynet
+borg

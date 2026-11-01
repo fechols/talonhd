@@ -1,0 +1,66 @@
+{
+  "id": "boss.s1.gantry_queen",
+  "create_image": {
+    "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: an airfield control tower turned walker: octagonal glass cab on a ribbed concrete shaft, crystal plates bolted over it, two stubby cannon arms. Shape: octagon on a square, two side arms, tapering lower block, four splayed legs. Paint: white-grey concrete, smoked glass cab ringed with purple crystal facets, light blue crystal armour plates, hazard-striped radar mast. Parts painted distinctly: concrete: ribbed concrete shaft; plates: crystal plates bolted over it; cab: octagonal glass cab; arms: stubby cannon arms. Only the object. No text, no markings, no pilot, no people, no base or stand."
+  },
+  "create": {
+    "model": "hero",
+    "texture_type": "simple",
+    "texture_size": 2048,
+    "target_num_faces": 24000,
+    "rig": true
+  },
+  "bake": {
+    "size_class": "BOSS",
+    "canvas": [
+      512,
+      512
+    ],
+    "length_px": 512,
+    "tris": 3000,
+    "orient": {
+      "roll": 9,
+      "roll_max_deg": 24
+    },
+    "materials": [
+      {
+        "name": "concrete",
+        "source": "ribbed concrete shaft",
+        "ramp": [
+          "void",
+          "dark"
+        ],
+        "floor": 1
+      },
+      {
+        "name": "plates",
+        "source": "crystal plates bolted over it",
+        "ramp": [
+          "dark",
+          "hot"
+        ],
+        "floor": 0
+      },
+      {
+        "name": "cab",
+        "source": "octagonal glass cab",
+        "ramp": [
+          "dark",
+          "light",
+          "hot"
+        ],
+        "floor": 1
+      },
+      {
+        "name": "arms",
+        "source": "stubby cannon arms",
+        "ramp": [
+          "void",
+          "dark",
+          "light"
+        ],
+        "floor": 1
+      }
+    ]
+  }
+}

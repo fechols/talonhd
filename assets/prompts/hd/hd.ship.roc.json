@@ -1,0 +1,80 @@
+{
+  "id": "hd.ship.roc",
+  "create_image": {
+    "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: a large heavy white and cobalt fighter shaped like a bird of prey with spread wings, a faceted cyan crystal heart set into its spine. Shape: broad spread wings with stepped feather-like trailing edges, a strong central body, a large faceted crystal at the centre, three nozzles. Paint: white armour, cobalt blue panels, a cyan crystal heart, light blue canopy glass, cyan exhaust glow. Parts painted distinctly: hull: white armour; panels: cobalt blue panels; crystal: cyan crystal heart; canopy: light blue canopy glass; glow: cyan exhaust glow. Only the object. No text, no markings, no pilot, no people, no base or stand."
+  },
+  "create": {
+    "model": "hero",
+    "texture_type": "simple",
+    "texture_size": 2048,
+    "target_num_faces": 2400,
+    "rig": false
+  },
+  "bake": {
+    "size_class": "M",
+    "canvas": [
+      60,
+      70
+    ],
+    "length_px": 68,
+    "tris": 300,
+    "orient": {
+      "roll": 9,
+      "roll_max_deg": 60
+    },
+    "materials": [
+      {
+        "name": "hull",
+        "source": "white armour",
+        "ramp": [
+          "void",
+          "dark",
+          "light"
+        ],
+        "floor": 2,
+        "emissive": false
+      },
+      {
+        "name": "panels",
+        "source": "cobalt blue panels",
+        "ramp": [
+          "void",
+          "dark",
+          "light"
+        ],
+        "floor": 2,
+        "emissive": false
+      },
+      {
+        "name": "crystal",
+        "source": "cyan crystal heart",
+        "ramp": [
+          "dark",
+          "hot"
+        ],
+        "floor": 0,
+        "emissive": false
+      },
+      {
+        "name": "canopy",
+        "source": "light blue canopy glass",
+        "ramp": [
+          "dark",
+          "light",
+          "hot"
+        ],
+        "floor": 1,
+        "emissive": false
+      },
+      {
+        "name": "glow",
+        "source": "cyan exhaust glow",
+        "ramp": [
+          "hot"
+        ],
+        "floor": 0,
+        "emissive": true
+      }
+    ]
+  }
+}

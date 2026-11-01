@@ -1,0 +1,56 @@
+{
+  "id": "enemy.common.wasp",
+  "create_image": {
+    "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: a small faceted crystal dart drone seen from directly above: purple arrowhead body, two swept triangular vanes, light blue facet edges, a hexagonal core. Shape: arrowhead, two swept vanes, notched tail, hexagonal core. Paint: purple faceted crystal, light blue facet edges, dark grey seam lines. Parts painted distinctly: body: purple crystal body; edges: light blue facet edges; core: hexagonal core. Only the object. No text, no markings, no pilot, no people, no base or stand."
+  },
+  "create": {
+    "model": "prop",
+    "texture_type": "simple",
+    "texture_size": 2048,
+    "target_num_faces": 1000,
+    "rig": false
+  },
+  "bake": {
+    "size_class": "S",
+    "canvas": [
+      20,
+      24
+    ],
+    "length_px": 24,
+    "tris": 60,
+    "orient": {
+      "yaw": 16,
+      "roll": 3,
+      "roll_max_deg": 40
+    },
+    "materials": [
+      {
+        "name": "body",
+        "source": "purple crystal body",
+        "ramp": [
+          "void",
+          "dark",
+          "hot"
+        ],
+        "floor": 1
+      },
+      {
+        "name": "edges",
+        "source": "light blue facet edges",
+        "ramp": [
+          "dark",
+          "hot"
+        ],
+        "floor": 0
+      },
+      {
+        "name": "core",
+        "source": "hexagonal core",
+        "ramp": [
+          "hot"
+        ],
+        "emissive": true
+      }
+    ]
+  }
+}

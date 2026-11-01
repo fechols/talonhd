@@ -1,0 +1,54 @@
+{
+  "id": "enemy.common.hatch",
+  "create_image": {
+    "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: a square armoured hatch seen from directly above: two sliding grey doors with yellow-black hazard edges, a purple crystal nest glowing in the shaft. Shape: square frame, two sliding doors, hazard-striped edges, glowing shaft. Paint: mid grey steel frame, light grey doors, yellow and black hazard paint, purple and light blue crystal. Parts painted distinctly: frame: grey frame and doors; hazard: yellow-black hazard edges; nest: purple crystal nest. Only the object. No text, no markings, no pilot, no people, no base or stand."
+  },
+  "create": {
+    "model": "prop",
+    "texture_type": "simple",
+    "texture_size": 2048,
+    "target_num_faces": 1000,
+    "rig": false
+  },
+  "bake": {
+    "size_class": "M",
+    "canvas": [
+      40,
+      40
+    ],
+    "length_px": 40,
+    "tris": 120,
+    "orient": {
+      "open": 6
+    },
+    "materials": [
+      {
+        "name": "frame",
+        "source": "grey frame and doors",
+        "ramp": [
+          "void",
+          "dark"
+        ],
+        "floor": 1
+      },
+      {
+        "name": "hazard",
+        "source": "yellow-black hazard edges",
+        "ramp": [
+          "dark",
+          "light"
+        ],
+        "floor": 0
+      },
+      {
+        "name": "nest",
+        "source": "purple crystal nest",
+        "ramp": [
+          "dark",
+          "hot"
+        ],
+        "floor": 0
+      }
+    ]
+  }
+}

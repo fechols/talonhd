@@ -1,0 +1,55 @@
+{
+  "id": "enemy.s1.skiff",
+  "create_image": {
+    "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: an orange Accord harbour patrol boat seen from directly above: pointed bow, grey deck, one deck gun, light blue crystal on the wheelhouse, white wake. Shape: pointed hull, square wheelhouse, small gun mount, trailing wake V. Paint: orange painted hull, dark grey deck and gun, light blue crystal, white foam wake. Parts painted distinctly: hull: orange hull; deck: grey deck and gun; crystal: light blue crystal on the wheelhouse. Only the object. No text, no markings, no pilot, no people, no base or stand."
+  },
+  "create": {
+    "model": "prop",
+    "texture_type": "simple",
+    "texture_size": 2048,
+    "target_num_faces": 1120,
+    "rig": false
+  },
+  "bake": {
+    "size_class": "M",
+    "canvas": [
+      28,
+      52
+    ],
+    "length_px": 52,
+    "tris": 140,
+    "orient": {
+      "yaw": 16
+    },
+    "materials": [
+      {
+        "name": "hull",
+        "source": "orange hull",
+        "ramp": [
+          "void",
+          "dark",
+          "light"
+        ],
+        "floor": 1
+      },
+      {
+        "name": "deck",
+        "source": "grey deck and gun",
+        "ramp": [
+          "void",
+          "dark"
+        ],
+        "floor": 1
+      },
+      {
+        "name": "crystal",
+        "source": "light blue crystal on the wheelhouse",
+        "ramp": [
+          "dark",
+          "hot"
+        ],
+        "floor": 0
+      }
+    ]
+  }
+}

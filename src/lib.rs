@@ -21,6 +21,8 @@ pub mod bake;
 #[cfg(feature = "host")]
 pub mod encode;
 #[cfg(feature = "host")]
+pub mod mesh;
+#[cfg(feature = "host")]
 pub mod model;
 #[cfg(feature = "host")]
 pub mod models;

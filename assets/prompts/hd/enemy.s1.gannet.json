@@ -1,0 +1,57 @@
+{
+  "id": "enemy.s1.gannet",
+  "create_image": {
+    "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: a Lattice-overgrown retro-future attack drone seen from directly above: gull-shaped wings like a diving seabird, light red armour, a light blue crystal eye. Shape: a broad flattened M of gull wings kinked back at the elbows, a short blunt pod body, a small fan tail, two round bomb pods under the wing elbows, crystal spikes on the wing roots. Paint: light red painted armour plates, dark grey seams, bomb pods and outline, light blue faceted crystal growing from the wing roots and forming a single round sensor eye where a cockpit would be. Parts painted distinctly: armour: light red armour; crystal: light blue crystal eye and spikes; pods: round bomb pods. Only the object. No text, no markings, no pilot, no people, no base or stand."
+  },
+  "create": {
+    "model": "hero",
+    "texture_type": "simple",
+    "texture_size": 2048,
+    "target_num_faces": 1280,
+    "rig": false
+  },
+  "bake": {
+    "size_class": "M",
+    "canvas": [
+      56,
+      40
+    ],
+    "length_px": 40,
+    "tris": 160,
+    "orient": {
+      "yaw": 16,
+      "pitch": 5,
+      "pitch_max_deg": 50
+    },
+    "materials": [
+      {
+        "name": "armour",
+        "source": "light red armour",
+        "ramp": [
+          "void",
+          "dark",
+          "light"
+        ],
+        "floor": 1
+      },
+      {
+        "name": "crystal",
+        "source": "light blue crystal eye and spikes",
+        "ramp": [
+          "dark",
+          "hot"
+        ],
+        "floor": 0
+      },
+      {
+        "name": "pods",
+        "source": "round bomb pods",
+        "ramp": [
+          "void",
+          "dark"
+        ],
+        "floor": 1
+      }
+    ]
+  }
+}
