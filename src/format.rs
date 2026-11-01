@@ -58,9 +58,9 @@ pub const REU_SIZE: u32 = 16 << 20;
 /// A single REU command must not cross a 512 KiB bank.
 pub const REU_BANK: u32 = 0x8_0000;
 /// Largest single DMA the runtime issues. The CPU (and so the raster IRQ that
-/// multiplexes the HUD sprites) is stalled for the whole transfer: 512 bytes
-/// is ~128 µs at 0.25 µs/byte, inside the HUD's 3-line row gap (~190 µs).
-pub const MAX_DMA: u16 = 512;
+/// multiplexes the HUD sprites) is stalled for the whole transfer: 256 bytes
+/// is ~70 µs (about a raster line), inside the IRQ's ~2-line slack (`hud`).
+pub const MAX_DMA: u16 = 256;
 /// HUD sprite blocks (64 bytes each) copied into both VIC banks at boot.
 pub const HUD_BLOCKS: u16 = 48;
 

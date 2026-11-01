@@ -35,8 +35,11 @@ pub const BUFFERS: [Buffer; 2] = [
 
 /// `$D018`: screen at bank+$0C00, bitmap at bank+$2000.
 pub const D018: u8 = 0x38;
-/// `$D016`: multicolor, 40 columns, no horizontal scroll.
-pub const D016: u8 = 0x18;
+/// `$D016` without XSCROLL: multicolor, 38 columns. The narrower window hides the bitmap's edges, so the
+/// camera shake can move XSCROLL either way around its rest position.
+pub const D016: u8 = 0x10;
+/// XSCROLL at rest: the shake moves it -4..=+3 hires px.
+pub const XSCROLL_REST: u8 = 4;
 /// Lines of the bitmap the VIC shows in 24-row mode: bitmap lines
 /// `fine..fine + VISIBLE` (see [`crate::render::Scroll`]).
 pub const VISIBLE: i16 = 192;

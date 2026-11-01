@@ -99,24 +99,35 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   (TALON with an eased bank, WASPs by heading, GANNETs by dive state, TWIN pairs, bullets, bursts, SPARKs),
   `game::hud_state` to the HUD. `Game::ticks` never resets (World::tick does at GAME OVER) and names the frame.
   The C64 runs the sim's autopilot (attract mode) until the stick or SPACE is touched (`STATUS+28` HUMAN), so
-  `compare` replays `game::replay(SHOWN_T)` on the host. The GANTRY QUEEN flies over the airfield
-  (`demo::queen`, lines 4400-5200) as scenery: not fought yet.
+  `compare` replays `game::replay(SHOWN_T)` on the host.
+- **Boss** (`src/boss.rs`, beside the vendored `World`, stepped after it each tick): the GANTRY QUEEN arrives at
+  line 4400, the scroll holds at 4560 (the step undoes the world's scroll) with `boss_ceiling` on. Phase 1:
+  arms and front legs 15 HP each (TRIPLE FAN, MAST SWEEP); phase 2: rear legs snap, `hot` goes yellow
+  (`game::palette`, a color-RAM fill), the cab rim takes 120 HP (RING BURST, OFFSET RINGS, TRIPLE FAN);
+  then 30,000 points, a chain of bursts, she sinks away and the stage scrolls on. Bullets go through
+  `World::spawn_ebullet`, scores through `add_score`. `the_fight_runs_to_the_end` plays it through.
+- **Hit feedback** (user): the HUD never flashes. The border ramps black, dark grey, light grey, white, light
+  red, red, light red, light grey, dark grey, black (`hud::FLASH_RAMP`, 2 frames a step); the camera shakes
+  for 16 frames (`game::shake`: panorama window and sprites move vertically, XSCROLL horizontally in
+  38-column mode, `layout::XSCROLL_REST` 4), and the HUD sprites move the opposite way (`hud::xs`,
+  `hud::build`'s Ys and IRQ lines).
 - **Frames and panorama:** `demo.rs` is the frame directory (boss body, arms, legs, WASP yaws, TALON banks,
   GANNET pitches, shots, bursts, SPARKs) plus the boss's flight (`PART_XY0` + compile-time `PART_DX`; no trig
   on the C64). Her six parts have one frame per body bank sample (`hand::queen_part_frames`, rendered at bake
   time, no `.mesh` files): same roll as the body, posed by the bank (barrels lean in, legs trail), so nothing
   jumps; `queen_parts_fit_and_move_smoothly` guards it. `src/s1.rs` paints the S1 BREAKWATER panorama (26 screens; ground void/dark only, flat concrete
   50 % checker, open ground 25 %, `light` for surf and paint, `hot` for crystal; `output/sheets/panorama.png`).
-- **C64 code space** (`target-c64/link.ld`, `opt-level = "s"`): `$0801-$4BFF` plus three regions copied at boot
-  from one load image at `$4C00-$7BFF` (frame-buffer space, free until the first frame): `.hitext`
-  `$E500-$FEFF` (HUD, boss, `sim::actors`), `.midtext` `$9000-$9FFF` (VIC sees char ROM, CPU RAM:
-  `sim::collide/common/world`), `.lowtext` `$0200-$07FF` (`sim::gauge`, `render`). Placement is by mangled
+- **C64 code space** (`target-c64/link.ld`, `opt-level = "s"`): `$0801-$4BFF` plus five regions copied at boot
+  from one load image at `$4C00-$8FFF` (frame-buffer/HUD space, free until the first frame): `.hitext`
+  `$E410-$FEFF` (HUD, boss flight, `sim::actors`, small game helpers), `.midtext` `$9000-$9FFF` (VIC sees
+  char ROM, CPU RAM: `sim::collide/gauge`), `.lowtext` `$0200-$07FF` (`render`), `.uptext` `$5C00-$5FFF`
+  (`sim::common/world`, `hw`), `.iotext` `$D000-$DFFF`, the RAM under the I/O chips (`boss`): the game step
+  runs with `$01 = $34`, so only pure code may live there, and `asm/hud.S` banks I/O in for itself. Placement is by mangled
   name in the link script (or `#[cfg_attr(target_arch = "mos", unsafe(link_section = ".hitext"))]`). Every
   region is nearly full: check `llvm-size -A dist/talonhd.elf` after changes. `World::digest` stays host-only
   (2 KB of 6502). Keep the `/DISCARD/ .init.250` rule: it calls KERNAL CHROUT at `$FFD2`, which is our code now.
 - **Boot:** the PRG erases the REU magic, then waits for magic + whole-image checksum, so `run` then `upload-reu`
   always starts on the complete new image.
-- **Next:** fight the GANTRY QUEEN and the KEELBREAKER (sim runners for the S1 waves TALON has no runner for:
-  SKIFF, PILLBOX, HATCH, CRAWLER), the promotion sequence and the per-level REU load. More code will need REU
-  code paging (as TALON) or a leaner memory map.
+- **Next:** REU code paging (as TALON's phases): every RAM region is now nearly full. Then the KEELBREAKER,
+  runners for SKIFF, PILLBOX, HATCH, CRAWLER, the promotion sequence and the per-level REU load.
 - **Hardware quirk:** `c64u.py run` right after `config` can reset the machine before the PRG loads; run again.

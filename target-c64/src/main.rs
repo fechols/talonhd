@@ -18,7 +18,7 @@ use talonhd::game::{self, Game};
 use talonhd::hw::Hw;
 use talonhd::sim::{self, world::GAME_OVER};
 use talonhd::layout::{self, BUFFERS, status};
-use talonhd::render::{self, Image, Scroll, Sprite};
+use talonhd::render::{self, Image, Sprite};
 
 unsafe extern "C" {
     fn reu_execute(command: u8);
@@ -188,6 +188,7 @@ pub extern "C" fn main() -> i16 {
     }
 
     let mut human = false;
+    let mut shown_palette = img.palette;
     // Ever touched: from then on the frames are no longer the host's attract-mode replay.
     let mut touched = false;
     let mut back = 1usize;
@@ -198,7 +199,7 @@ pub extern "C" fn main() -> i16 {
         #[cfg(feature = "raster-bars")]
         c.poke(0xD020, 2);
         let n = game::scene(g, sprites);
-        let scroll = Scroll::new(&img, game::scroll(g));
+        let scroll = game::view(g, &img);
         // render::render_frame, split so the background can be timed.
         render::restore_background(c, &img, buf, scroll);
         let bg = micros(c).wrapping_sub(start);
@@ -236,6 +237,12 @@ pub extern "C" fn main() -> i16 {
         render::present(c, buf, scroll);
         flipped_at = micros(c);
         render::hud_update(c, &game::hud_state(g));
+        // The boss's phase 2 recolors `hot` (a color RAM fill), in step with the frame just shown.
+        let pal = game::palette(g, img.palette);
+        if pal != shown_palette {
+            render::set_palette(c, pal);
+            shown_palette = pal;
+        }
         c.poke(layout::STATUS + status::FRONT, back as u8);
         status_poke16(c, status::SHOWN_T, g.ticks as u16);
         c.poke(layout::STATUS + status::HUMAN, touched as u8);
@@ -254,8 +261,12 @@ pub extern "C" fn main() -> i16 {
             if g.world.state == GAME_OVER {
                 human = false;
             }
+            // The step runs with I/O banked out: the boss code lives in the RAM under $D000 (it and
+            // everything it calls are pure computation; the HUD IRQ banks I/O in for itself).
+            c.poke(0x0001, 0x34);
             let input = if human { stick } else { sim::replay::autopilot(&g.world) };
             g.step(input);
+            c.poke(0x0001, 0x35);
         }
     }
 }

@@ -11,9 +11,11 @@
 ; arms the IRQ for the next
 ; row (wrapping to row 0, which is set up in the top border).
 ;
-; Touches only A, X, Y (saved), VIC registers, the pointer slots and ROW: no
-; zero page, no REU, no Rust state, so it may interrupt anything, including
-; draw_column_asm (which owns $F0-$FF).
+; Touches only A, X, Y (saved), $01 (saved), VIC registers, the pointer slots
+; and ROW: no zero page, no REU, no Rust state, so it may interrupt anything,
+; including draw_column_asm (which owns $F0-$FF) and the game step, which runs
+; with I/O banked out ($01 = $34, code in the RAM under $D000): the handler
+; banks I/O in for its own writes and restores $01 on the way out.
 
 HUD      = $CB00
 H_ROW    = HUD + 0
@@ -31,6 +33,10 @@ hud_irq:
     pha
     tya
     pha
+    lda $01
+    pha
+    lda #$35
+    sta $01             ; I/O in (the game step may have banked it out)
     lda #$01
     sta $d019           ; acknowledge the raster interrupt
 
@@ -92,6 +98,8 @@ hud_irq:
     lda H_LINES,x
     sta $d012
 
+    pla
+    sta $01
     pla
     tay
     pla

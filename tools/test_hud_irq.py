@@ -17,7 +17,7 @@ from test_blit import symbol  # noqa: E402
 HUD, ROWS = 0xCB00, 8
 LINES, YS, PTRS = HUD + 1, HUD + 9, HUD + 17
 SENTINEL = 0xFFF0
-ALLOWED = {0xD019, 0xD012, HUD} | {0xD001 + 2 * i for i in range(8)} | \
+ALLOWED = {0x0001, 0xD019, 0xD012, HUD} | {0xD001 + 2 * i for i in range(8)} | \
     {0x4FF8 + i for i in range(8)} | {0x8FF8 + i for i in range(8)}
 
 
@@ -39,7 +39,8 @@ def main():
             mem[PTRS + 8 * r:PTRS + 8 * r + 8] = bytes(ptrs[r])
         start = rng.randrange(ROWS)
         mem[HUD] = start
-        cpu = Cpu(mem, [(0x100, 0x200), (0xD000, 0xD040), (HUD, HUD + 1), (0x4FF8, 0x5000), (0x8FF8, 0x9000)])
+        mem[1] = 0x34  # interrupted inside the game step, I/O banked out
+        cpu = Cpu(mem, [(0x0001, 0x0002), (0x100, 0x200), (0xD000, 0xD040), (HUD, HUD + 1), (0x4FF8, 0x5000), (0x8FF8, 0x9000)])
         for k in range(ROWS):
             row = (start + k) % ROWS
             cpu.a, cpu.x, cpu.y = 0x11, 0x22, 0x33
@@ -59,6 +60,10 @@ def main():
             errors = []
             if (cpu.a, cpu.x, cpu.y) != (0x11, 0x22, 0x33):
                 errors.append('registers not restored')
+            if mem[1] != 0x34:
+                errors.append('$01 not restored')
+            if 0x0001 not in cpu.writes:
+                errors.append('I/O not banked in')
             if any(mem[0xD001 + 2 * i] != ys[row] for i in range(8)):
                 errors.append('sprite Y')
             for i in range(8):

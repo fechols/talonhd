@@ -226,8 +226,8 @@ pub fn render_game(m: &mut Machine, img: &crate::render::Image, g: &crate::game:
     use crate::{game, render};
     let mut sprites = [render::Sprite::default(); game::INSTANCES];
     let n = game::scene(g, &mut sprites);
-    let scroll = render::Scroll::new(img, game::scroll(g));
-    render::set_palette(m, img.palette);
+    let scroll = game::view(g, img);
+    render::set_palette(m, game::palette(g, img.palette));
     render::render_frame(m, img, buf, scroll, &mut sprites[..n]);
     render::present(m, buf, scroll);
     render::hud_init(m, img);

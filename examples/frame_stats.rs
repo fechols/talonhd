@@ -46,7 +46,7 @@ fn main() {
     let g = game::replay(t as u32);
     let mut sprites = [render::Sprite::default(); game::INSTANCES];
     let n = game::scene(&g, &mut sprites);
-    let scroll = render::Scroll::new(&img, game::scroll(&g));
+    let scroll = game::view(&g, &img);
     render::render_frame(&mut c, &img, BUFFERS[0], scroll, &mut sprites[..n]);
     println!("t={t}: column links {} | setup/bg DMAs {} | DMA bytes {} | blends {} | I/O writes {}",
         c.links, c.other_dmas, c.dma_bytes, c.blends, c.io_writes);

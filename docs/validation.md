@@ -227,3 +227,33 @@ models rev 8). `queen_parts_fit_and_move_smoothly`: no part touches its canvas, 
 re-measured: arms 96 × 216, legs 152 × 200. Arms 1.07 MB, legs 1.72 MB; image 5.31 MB (31.7 %). The 34
 per-pose `.mesh` files are gone (frames come straight from `hand.rs`); C64 code shrank ~900 bytes.
 C64U: held frame tick 9380 (boss over the airfield, render 9.5 ms): **0 mismatched bytes**.
+
+## 2026-11-01 — The GANTRY QUEEN fight; border flash, camera shake, counter-shaking HUD
+
+- **Fight** (`src/boss.rs`, state beside the vendored `World`): she arrives at line 4400; the scroll holds at
+  4560. Phase 1 targets are what the TALON can reach in the flying staging: both arm cannons and the two
+  front legs, 15 HP each (the rear legs hang above the screen); TRIPLE FAN and MAST SWEEP. Phase 2: rear
+  legs snap, `hot` turns yellow (bible `phase2_hot = 7`), the cab rim has 120 HP; RING BURST, OFFSET RINGS,
+  TRIPLE FAN. Defeat: 30,000 points, bursts, she sinks away, the stage scrolls on.
+  `the_fight_runs_to_the_end` plays it through on the host (the attract autopilot reaches the fight but
+  never breaks all four parts, so phase 2 is covered by that test, not by the hardware replay).
+- **Hit feedback** (user): no HUD flashing; the border ramps 0, 11, 15, 1, 10, 2, 10, 15, 11, 0 (2 frames
+  each); the view shakes for 16 frames (vertical through the panorama window and sprites, horizontal
+  through XSCROLL in 38-column mode, rest 4) and the HUD sprites move the opposite way.
+- **Code space:** +4.9 KB (fight, shake). Two more boot-copied regions: `$5C00-$5FFF` and the RAM under
+  the I/O chips, `$D000-$DFFF`, for the boss code: the game step runs with `$01 = $34` and `asm/hud.S`
+  now saves `$01`, banks I/O in and restores it (`test_hud_irq.py` checks it from a `$34` state).
+  `.hitext` starts at `$E410`. Low RAM has 485 bytes left.
+- Bake self-check: model = reference at 14 ticks incl. a camera shake (3509) and the fight (9320).
+- C64U: held frame tick 9580 (mid-fight, render 8.1 ms): **0 mismatched bytes**.
+
+## 2026-11-01 — HUD multiplexer race fixed
+
+User saw HUD lines flicker (e.g. under LIFE). Four C64U captures diffed: in one, the last line of every row
+in sprite 5's column showed the next row's last line (LIFE's underline gone, ARM's a row too high). Cause:
+a sprite at Y shows on lines Y+1..Y+21 and the VIC fetches that last line for sprites 3-7 early in line
+Y+21, exactly when the row IRQ switched pointers; at 64 MHz the handler sometimes won. Fix: the row IRQ fires
+at Y+22 (`hud::build`), still before the next row's Y compare at Y+24, and `MAX_DMA` is 256 bytes (~1 line
+of CPU stall) to keep that slack. Background restore 2.24 -> 2.47 ms (more DMA commands). After the fix,
+8 captures: HUD green pixels identical in all of them outside the two scrolling tapes (dark specks inside
+glyphs are the panorama showing through transparent sprite pixels).

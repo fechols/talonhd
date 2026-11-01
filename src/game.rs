@@ -6,7 +6,9 @@
 //! Everything here is a function of `Game` alone, which is itself a function of the input log, so the host
 //! replays the C64's attract mode to any tick and renders the identical frame.
 
+use crate::boss::Boss;
 use crate::demo::{self, *};
+use crate::render::Palette;
 use crate::hud;
 use crate::render::Sprite;
 use crate::sim::actors::{B_BOMB, G_CLIMB, G_DIVE, G_PULLUP, G_TELEGRAPH};
@@ -14,8 +16,9 @@ use crate::sim::common::sway;
 use crate::sim::world::*;
 use crate::sim::{LEFT, RIGHT, World};
 
-/// Where the playfield sits on screen (hires px, lines).
-pub const OX: i16 = 8;
+/// Where the playfield sits in the bitmap (hires px, lines): with XSCROLL at rest (4) in 38-column mode
+/// the visible bitmap is hires 3..306, so the 304-px field at 4 shows whole.
+pub const OX: i16 = 4;
 pub const OY: i16 = 8;
 
 /// Every sprite a frame can hold: the boss, the pools of the sim and the TALON.
@@ -48,11 +51,13 @@ pub struct Game {
     /// Ticks stepped since power-on. `World::tick` restarts with every new game; this does not, so it
     /// names a frame of the attract mode across game overs (the C64's `SHOWN_T`, the host's replay).
     pub ticks: u32,
+    /// The GANTRY QUEEN fight (`crate::boss`).
+    pub boss: Boss,
 }
 
 impl Game {
     pub const fn new() -> Game {
-        Game { world: World::new(), pilot: Pilot { bank: 0, deaths: 0, since_hit: 255 }, ticks: 0 }
+        Game { world: World::new(), pilot: Pilot { bank: 0, deaths: 0, since_hit: 255 }, ticks: 0, boss: Boss { state: 0, hp: [0; 4], core: 0, broken: 0, turn: 0, pat: 0, step: 0, timer: 0, sink: 0 } }
     }
 
     /// Power-on state in place (the C64 keeps `Game` zeroed in BSS and calls this at boot).
@@ -62,6 +67,7 @@ impl Game {
         self.world.reset();
         self.pilot = Pilot { bank: 0, deaths: 0, since_hit: 255 };
         self.ticks = 0;
+        self.boss = Boss::default();
     }
 
     /// One tick with this tick's input.
@@ -69,6 +75,7 @@ impl Game {
     pub fn step(&mut self, input: u8) {
         self.ticks = self.ticks.wrapping_add(1);
         self.world.step(input);
+        self.boss.step(&mut self.world);
         let p = &mut self.pilot;
         let target = if self.world.state != PLAY {
             0
@@ -106,7 +113,26 @@ fn lines(g: &Game) -> u16 {
     (g.world.scroll_lines() % PANO_PERIOD as u32) as u16
 }
 
-/// Panorama line at the top of the screen.
+/// The camera shake after the TALON is hit: hires px right, lines down, decaying over 16 frames.
+const SHAKE_X: [i8; 16] = [-4, 4, -3, 3, -4, 2, -3, 2, -2, 1, -2, 1, -1, 1, 0, 0];
+const SHAKE_Y: [i8; 16] = [2, -2, 1, -2, 2, -1, 1, -1, 1, 0, -1, 0, 1, 0, 0, 0];
+
+/// This frame's camera shake (hires px right, lines down).
+pub fn shake(g: &Game) -> (i8, i8) {
+    let t = g.pilot.since_hit as usize;
+    if t < 16 { (SHAKE_X[t], SHAKE_Y[t]) } else { (0, 0) }
+}
+
+/// The view this frame: panorama window and XSCROLL, both moved by the shake (sprites follow in `scene`).
+pub fn view(g: &Game, img: &crate::render::Image) -> crate::render::Scroll {
+    let (sx, sy) = shake(g);
+    let line = (demo::scroll(lines(g)) as i16 - sy as i16).rem_euclid(PANO_PERIOD as i16) as u16;
+    let mut v = crate::render::Scroll::new(img, line);
+    v.xs = (crate::layout::XSCROLL_REST as i8 + sx) as u8;
+    v
+}
+
+/// Panorama line at the top of the screen (no shake).
 pub fn scroll(g: &Game) -> u16 {
     demo::scroll(lines(g))
 }
@@ -117,22 +143,9 @@ fn place(frame: u16, x: i16, y: i16, w: u16, h: u16, z: i16) -> Sprite {
     Sprite { frame, x: ((x + OX) >> 1) - (w >> 1) as i16, y: y + OY - (h >> 1) as i16, z }
 }
 
-/// The GANTRY QUEEN's approach (the stage boss; not yet fought, `docs/validation.md`): she descends into
-/// view over the hangar apron and lifts away before the stage loops. Lines above her hover line, or None
-/// while she is off screen.
-fn queen_lift(lines: u16) -> Option<i16> {
-    const ARRIVE: u16 = 4400;
-    const HOVER: u16 = 4560;
-    const LEAVE: u16 = 5040;
-    if lines < ARRIVE {
-        None
-    } else if lines < HOVER {
-        Some(((HOVER - lines) * 2) as i16)
-    } else if lines < LEAVE {
-        Some(0)
-    } else {
-        Some(((lines - LEAVE) * 4) as i16)
-    }
+/// The stage palette with the fight's recolor (phase 2 turns `hot` yellow).
+pub fn palette(g: &Game, base: Palette) -> Palette {
+    g.boss.palette(base)
 }
 
 /// Fill `out` with this frame's sprites; returns how many.
@@ -141,10 +154,7 @@ pub fn scene(g: &Game, out: &mut [Sprite; INSTANCES]) -> usize {
     let w = &g.world;
     let mut n = 0;
     let (px, py) = ((w.player.x >> 8) as i16, (w.player.y >> 8) as i16);
-    if let Some(lift) = queen_lift(lines(g)) {
-        demo::queen(w.tick as u16, lift, &mut out[..QUEEN_SPRITES]);
-        n = QUEEN_SPRITES;
-    }
+    n += g.boss.sprites(w, &mut out[..QUEEN_SPRITES]);
     for k in 0..GANNETS {
         let gn = &w.gannets[k];
         if gn.state != 0 {
@@ -207,6 +217,13 @@ pub fn scene(g: &Game, out: &mut [Sprite; INSTANCES]) -> usize {
             n += 1;
         }
     }
+    // The camera shake moves everything drawn with the panorama (XSCROLL does the sideways part).
+    let dy = shake(g).1 as i16;
+    if dy != 0 {
+        for s in out[..n].iter_mut() {
+            s.y += dy;
+        }
+    }
     n
 }
 
@@ -227,6 +244,8 @@ pub fn hud_state(g: &Game) -> hud::State {
         tape_l: w.tick as u16,
         tape_r: lines(g),
         since_hit: g.pilot.since_hit,
+        shake: shake(g),
+        border: 0,
     }
 }
 

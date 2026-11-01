@@ -130,14 +130,27 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
     let img = render::read_image(&mut m).unwrap();
     // Attract-mode ticks: the first frames, WASP strings, a GANNET's dive and bombs, the docks, the boss.
     let mut g = game::Game::new();
-    // The last check is the first tick the GANTRY QUEEN hovers over the apron.
+    // Then probed ticks: a camera shake (the TALON just hit), 200 ticks into the GANTRY QUEEN fight, and
+    // phase 2 if the autopilot gets there.
     let mut ticks = vec![0u32, 1, 2, 3, 150, 450, 900, 1700, 3300, 3420, 5000, 7000];
     let mut probe = game::Game::new();
-    while probe.world.scroll_lines() % demo::PANO_PERIOD as u32 != 4600 && probe.ticks < 60_000 {
+    let (mut shake, mut fight, mut phase2) = (None, None, None);
+    while probe.ticks < 40_000 && (shake.is_none() || fight.is_none()) {
         let input = talonhd::sim::replay::autopilot(&probe.world);
         probe.step(input);
+        if shake.is_none() && probe.pilot.since_hit == 3 {
+            shake = Some(probe.ticks);
+        }
+        if probe.boss.state == talonhd::boss::PHASE1 && fight.is_none() {
+            fight = Some(probe.ticks + 200);
+        }
+        if probe.boss.state == talonhd::boss::PHASE2 && phase2.is_none() {
+            phase2 = Some(probe.ticks + 30);
+        }
     }
-    ticks.push(probe.ticks);
+    ticks.extend([shake, fight, phase2].into_iter().flatten());
+    ticks.sort();
+    println!("self-check ticks {ticks:?} (shake {shake:?}, fight {fight:?}, phase 2 {phase2:?})");
     for t in ticks {
         while g.ticks < t {
             let input = talonhd::sim::replay::autopilot(&g.world);
@@ -147,7 +160,8 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         let scroll = model::render_game(&mut m, &img, &g, buf);
         let mut sc = [render::Sprite::default(); game::INSTANCES];
         let n = game::scene(&g, &mut sc);
-        let want = reference::compose(&pano, &frames, scroll, &sc[..n]);
+        let mut want = reference::compose(&pano, &frames, scroll, &sc[..n]);
+        want.color = vec![game::palette(&g, pano.palette).color; 1000];
         check(&m, buf, &want).map_err(|e| format!("t={t}: {e}"))?;
         png::save(&previews.join(format!("frames/t{t:04}.png")), 320, layout::VISIBLE as u32, &m.visible_with_hud(buf, img.palette.d021, scroll.fine))?;
     }

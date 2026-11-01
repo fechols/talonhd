@@ -152,21 +152,17 @@ pub fn set_palette<H: Hw + ?Sized>(hw: &mut H, pal: Palette) {
 }
 
 /// Copy the HUD's static sprite blocks into both VIC banks and set up the 8
-/// sprites (hires, unexpanded, in front, X positions). Call once at boot.
+/// sprites (hires, unexpanded, in front, green). Call once at boot.
 #[inline(never)]
 #[cfg_attr(target_arch = "mos", unsafe(link_section = ".hitext"))]
 pub fn hud_init<H: Hw + ?Sized>(hw: &mut H, img: &Image) {
     for base in layout::HUD_BLOCK_BASE {
         hw::fetch(hw, img.hud, base, format::HUD_BLOCKS * hud::BLOCK as u16);
     }
-    let mut msb = 0u8;
-    for (i, &x) in hud::X.iter().enumerate() {
-        hw.poke(0xD000 + 2 * i as u16, x as u8);
-        if x > 255 {
-            msb |= 1 << i;
-        }
+    // Colors are fixed (the damage flash is on the border); X positions follow the shake in hud_update.
+    for (i, &c) in hud::COLORS.iter().enumerate() {
+        hw.poke(0xD027 + i as u16, c);
     }
-    hw.poke(0xD010, msb);
     hw.poke(0xD017, 0);
     hw.poke(0xD01B, 0);
     hw.poke(0xD01C, 0);
@@ -189,9 +185,15 @@ pub fn hud_update<H: Hw + ?Sized>(hw: &mut H, s: &hud::State) {
             hw.poke(base + hud::table::PTRS + (r * 8 + c) as u16, t.ptrs[r][c]);
         }
     }
-    for (i, &c) in hud::colors(s).iter().enumerate() {
-        hw.poke(0xD027 + i as u16, c);
+    let mut msb = 0u8;
+    for (i, &x) in hud::xs(s).iter().enumerate() {
+        hw.poke(0xD000 + 2 * i as u16, x as u8);
+        if x > 255 {
+            msb |= 1 << i;
+        }
     }
+    hw.poke(0xD010, msb);
+    hw.poke(0xD020, hud::border(s));
     let mut blocks = [[0u8; hud::BLOCK]; hud::block::DYNAMIC_COUNT];
     hud::dynamic_blocks(s, &mut blocks);
     for bank in layout::HUD_BLOCK_BASE {
@@ -228,13 +230,19 @@ pub fn sort_by_z(sprites: &mut [Sprite]) {
 pub struct Scroll {
     pub coarse: u16,
     pub fine: u8,
+    /// `$D016` XSCROLL (0-7 hires px): `layout::XSCROLL_REST` at rest; the camera shake moves it.
+    pub xs: u8,
 }
 
 impl Scroll {
     pub fn new(img: &Image, scroll: u16) -> Scroll {
         let max = (img.bg_rows.max(layout::ROWS) - layout::ROWS) * 8;
         let s = scroll.min(max);
-        Scroll { coarse: s >> 3, fine: (s & 7) as u8 }
+        Scroll { coarse: s >> 3, fine: (s & 7) as u8, xs: layout::XSCROLL_REST }
+    }
+    /// `$D016`: multicolor, 38 columns (the border hides the XSCROLL gap), XSCROLL.
+    pub fn d016(self) -> u8 {
+        layout::D016 | (self.xs & 7)
     }
     /// `$D011`: bitmap mode, display on, 24 rows, YSCROLL.
     pub fn d011(self) -> u8 {
@@ -266,6 +274,7 @@ pub fn present<H: Hw + ?Sized>(hw: &mut H, buf: Buffer, scroll: Scroll) {
     let dd00 = hw.peek(0xDD00) & 0xFC | buf.dd00;
     hw.poke(0xDD00, dd00);
     hw.poke(0xD011, scroll.d011());
+    hw.poke(0xD016, scroll.d016());
 }
 
 /// Draw one sprite at bitmap coordinates (`y` is a bitmap line).

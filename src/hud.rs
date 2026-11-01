@@ -4,8 +4,14 @@
 //!
 //! Rows are 21 lines of sprite plus a 3-line gap (8 × 24 = 192 = the visible
 //! lines in 24-row mode). In each gap a raster IRQ (`target-c64/asm/hud.S`)
-//! writes the next row's 8 Y positions and 8 pointers from [`Table`]; the gap
-//! is the IRQ's timing slack (~190 µs), which is why the REU DMA is capped
+//! writes the next row's 8 Y positions and 8 pointers from [`Table`].
+//!
+//! Timing: a sprite at Y shows on lines Y+1..Y+21, and the VIC fetches that
+//! last line's data for sprites 3-7 in the first cycles of line Y+21, so the
+//! IRQ fires at Y+22 (a pointer switch at Y+21 raced those fetches: the label
+//! underlines on sprite 5's last line jumped a row). The next row's Y must be
+//! in before the VIC compares it near the end of line Y+24, so the IRQ has
+//! ~2 lines of slack, and the REU DMA, which stalls the CPU, is capped
 //! ([`crate::format::MAX_DMA`]).
 //!
 //! Hardware sprites have their own color registers, so the HUD stays green on
@@ -31,9 +37,12 @@ pub const LIGHT_GREEN: u8 = 13;
 pub const WHITE: u8 = 1;
 pub const RED: u8 = 2;
 /// Damage flash: frames of white, then frames of red (from the hit).
-pub const FLASH_WHITE: u8 = 2;
-pub const FLASH_RED: u8 = 6;
-pub const FLASH_FRAMES: u8 = FLASH_WHITE + FLASH_RED;
+/// The damage flash is on the border (`$D020`), a smooth ramp out of black and back (user's sequence):
+/// dark grey, light grey, white, light red, red, light red, light grey, dark grey, 2 frames each, then the
+/// stage's border (black). The HUD itself never flashes; it shakes against the view (`State::shake`).
+pub const FLASH_RAMP: [u8; 8] = [11, 15, 1, 10, 2, 10, 15, 11];
+pub const FLASH_STEP: u8 = 2;
+pub const FLASH_FRAMES: u8 = FLASH_RAMP.len() as u8 * FLASH_STEP;
 
 pub const BLOCK: usize = 64;
 pub const BLOCKS: usize = crate::format::HUD_BLOCKS as usize;
@@ -86,8 +95,13 @@ pub struct State {
     /// Tape positions (any units; one line per unit).
     pub tape_l: u16,
     pub tape_r: u16,
-    /// Frames since the last hit (>= FLASH_FRAMES: no flash).
+    /// Frames since the last hit (>= FLASH_FRAMES: no border flash).
     pub since_hit: u8,
+    /// The rendered view's shake this frame (hires px right, lines down); the HUD moves the opposite way,
+    /// like a helmet display jolting against the scene.
+    pub shake: (i8, i8),
+    /// The border color between flashes.
+    pub border: u8,
 }
 
 /// The raster IRQ's table at [`crate::layout::HUD_TABLE`]:
@@ -149,22 +163,27 @@ pub fn build(s: &State) -> Table {
     ptrs[7][6] = STAGE;
     let mut lines = [0u8; ROWS];
     let mut ys = [0u8; ROWS];
+    let dy = -(s.shake.1 as i16);
     for r in 0..ROWS {
-        ys[r] = row_y(r);
-        lines[r] = if r == 0 { TOP_IRQ_LINE } else { row_y(r) - 3 };
+        let y = (row_y(r) as i16 + dy) as u8;
+        ys[r] = y;
+        lines[r] = if r == 0 { TOP_IRQ_LINE } else { y - 2 };
     }
     Table { lines, ys, ptrs }
 }
 
-/// Per-channel colors, with the damage flash (white, then red, then green).
-pub fn colors(s: &State) -> [u8; 8] {
-    if s.since_hit < FLASH_WHITE {
-        return [WHITE; 8];
-    }
-    if s.since_hit < FLASH_FRAMES {
-        return [RED; 8];
-    }
-    [GREEN, LIGHT_GREEN, LIGHT_GREEN, GREEN, GREEN, LIGHT_GREEN, LIGHT_GREEN, GREEN]
+/// Per-channel colors: always green.
+pub const COLORS: [u8; 8] = [GREEN, LIGHT_GREEN, LIGHT_GREEN, GREEN, GREEN, LIGHT_GREEN, LIGHT_GREEN, GREEN];
+
+/// The border this frame: the damage flash ramp, else the stage's border.
+pub fn border(s: &State) -> u8 {
+    if s.since_hit < FLASH_FRAMES { FLASH_RAMP[(s.since_hit / FLASH_STEP) as usize] } else { s.border }
+}
+
+/// Sprite X positions this frame: the HUD columns moved against the view's shake.
+pub fn xs(s: &State) -> [u16; 8] {
+    let dx = -(s.shake.0 as i16);
+    X.map(|x| (x as i16 + dx) as u16)
 }
 
 // --------------------------------------------------------------------- drawing
@@ -404,20 +423,32 @@ mod tests {
         assert_eq!(t.ys[0], 54);
         assert_eq!(t.ys[7] as u16 + 21, 54 + 189);
         for r in 1..ROWS {
-            // The IRQ for row r lands after row r-1's last line and before row r.
-            assert!(t.lines[r] > t.ys[r - 1] + 20 && t.lines[r] < t.ys[r]);
+            // The IRQ for row r lands after row r-1's last fetch (line Y+21) and 2 lines before row r.
+            assert_eq!(t.lines[r], t.ys[r - 1] + 22);
+            assert_eq!(t.lines[r], t.ys[r] - 2);
         }
         assert!(t.ptrs.iter().flatten().all(|&p| (p as usize) < BLOCKS));
     }
 
     #[test]
-    fn flash_goes_white_red_green() {
-        let at = |f| colors(&State { since_hit: f, ..State::default() })[0];
-        assert_eq!(at(0), WHITE);
-        assert_eq!(at(1), WHITE);
-        assert_eq!(at(2), RED);
-        assert_eq!(at(7), RED);
-        assert_eq!(at(8), GREEN);
+    fn border_ramps_through_white_and_red_and_back_to_black() {
+        let seq: Vec<u8> = (0..FLASH_FRAMES + 2).step_by(2).map(|f| border(&State { since_hit: f, border: 0, ..State::default() })).collect();
+        // dark grey, light grey, white, light red, red, light red, light grey, dark grey, black
+        assert_eq!(seq, [11, 15, WHITE, 10, RED, 10, 15, 11, 0]);
+    }
+
+    #[test]
+    fn hud_moves_against_the_shake() {
+        let still = build(&State::default());
+        let s = State { shake: (-4, 2), ..State::default() };
+        let t = build(&s);
+        for r in 0..ROWS {
+            assert_eq!(t.ys[r] as i16, still.ys[r] as i16 - 2);
+        }
+        for r in 1..ROWS {
+            assert_eq!(t.lines[r], t.ys[r - 1] + 22);
+        }
+        assert_eq!(xs(&s)[0], X[0] + 4);
     }
 
     #[test]
