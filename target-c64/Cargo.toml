@@ -1,0 +1,36 @@
+[package]
+name = "talonhd-c64"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+build = "build.rs"
+
+[workspace]
+
+[[bin]]
+name = "talonhd-c64"
+path = "src/main.rs"
+test = false
+bench = false
+
+[features]
+default = []
+# Use the Rust reference column kernel instead of asm/blit.S (A/B testing).
+rust-columns = []
+# Show render time as a border color bar.
+raster-bars = []
+# Time sprite setup / column overhead / column kernel into the status block
+# (costs a few CIA reads per column).
+profile = []
+
+[dependencies]
+talonhd = { path = "..", default-features = false }
+
+[profile.release]
+opt-level = 2
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+overflow-checks = false
+debug = true
+strip = false

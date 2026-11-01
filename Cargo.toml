@@ -1,0 +1,33 @@
+[package]
+name = "talonhd"
+version = "0.1.0"
+edition = "2024"
+description = "TALON HD: flat-shaded 3D ships on REU-DMA software sprites for the C64 Ultimate"
+
+[lib]
+name = "talonhd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "talonhd"
+path = "src/main.rs"
+required-features = ["host"]
+
+[workspace]
+exclude = ["target-c64"]
+
+[features]
+default = ["host"]
+host = []
+
+[dependencies]
+
+[profile.dev]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_arch, values("mos"))'] }
