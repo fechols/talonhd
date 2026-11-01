@@ -264,6 +264,8 @@ def export_prompts(include_all: bool) -> int:
         if data.get("kind") == "hd_ship":
             if not include_all and data.get("status") not in APPROVED:
                 continue
+            if data["model"].get("ludo", {}).get("generator") == "hand":
+                continue  # built in src/hand.rs
             req = model_request(art, data["id"], data["identity"], data["silhouette"], data["materials"], data["model"])
         elif data.get("kind") == "hd_models":
             if not include_all and data.get("status") not in APPROVED:

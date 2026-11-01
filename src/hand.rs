@@ -20,9 +20,255 @@ const HOT: u8 = 3;
 /// The GANTRY QUEEN's on-screen scale (art direction review, 2026-10-31).
 pub const QUEEN_SCALE: f64 = 0.6;
 
-/// Every hand model: (bible id, model).
-pub fn all() -> Vec<(&'static str, ModelFile)> {
-    vec![("boss.s1.gantry_queen", gantry_queen())]
+/// Every hand model: (file id, model). Pose variants carry a `.<pose>` suffix on the bible id.
+pub fn all() -> Vec<(String, ModelFile)> {
+    let mut out: Vec<(String, ModelFile)> = vec![
+        ("boss.s1.gantry_queen".into(), gantry_queen()),
+        ("enemy.common.wasp".into(), wasp()),
+        ("enemy.s1.gannet".into(), gannet()),
+        ("enemy.s1.skiff".into(), skiff()),
+        ("enemy.common.pillbox".into(), pillbox()),
+        ("enemy.common.crawler".into(), crawler()),
+        ("midboss.s1.keelbreaker".into(), keelbreaker()),
+        ("midboss.s1.keelbreaker.turret".into(), keelbreaker_turret()),
+        ("hd.ship.talon".into(), talon()),
+    ];
+    for k in 0..HATCH_POSES {
+        out.push((format!("enemy.common.hatch.open{k}"), hatch(k)));
+    }
+    out
+}
+
+// Materials shared by the roster. Enemies are dark and hot; light is only for highlights.
+// A main hull at half albedo on void-dark-light: flat tops solid dark, light-facing slopes catch a
+// light checker, only faces turned away fall toward void (a void checker over the sea reads as a hole).
+fn hull() -> Material {
+    Material::lit(&[VOID, DARK, LIGHT], 0.6, 2)
+}
+/// Secondary parts (tracks, doors, pods, decks): solid dark on top, darker on the shade side.
+fn hull_dark() -> Material {
+    Material::lit(&[VOID, DARK], 0.85, 1)
+}
+fn crystal() -> Material {
+    Material::lit(&[DARK, HOT], 1.0, 0)
+}
+fn weapon() -> Material {
+    Material::lit(&[VOID, DARK, HOT], 0.75, 1)
+}
+
+/// WASP: a small faceted crystal dart. Pure Lattice: hot facets over dark, a glowing hexagonal core,
+/// two swept vanes and a notched tail. 22 px long, about as wide.
+pub fn wasp() -> ModelFile {
+    let mut m = Mesh::new(vec![Material::lit(&[VOID, DARK, HOT], 0.85, 1), hull_dark(), Material::glow(HOT)]);
+    let (n, r, t, l) = ([0.0, 11.0, 1.5], [5.0, -1.0, 1.0], [0.0, -6.0, 1.0], [-5.0, -1.0, 1.0]);
+    let (a, b) = ([0.0, 1.0, 5.0], [0.0, 1.0, -2.0]);
+    for (p, q) in [(n, r), (r, t), (t, l), (l, n)] {
+        m.tri(a, p, q, 0);
+        m.tri(b, q, p, 0);
+    }
+    m.sym(&[[4.0, -1.0, 1.0], [11.0, -11.0, 0.0], [3.0, -7.0, 1.0]], 1);
+    m.sym(&[[1.0, -5.0, 1.0], [3.0, -11.0, 0.5], [0.0, -7.0, 1.0]], 1);
+    let core: Vec<V3> = Mesh::ring(6, 2.2, 5.2, 0.0).into_iter().map(|p| [p[0], p[1] + 1.0, p[2]]).collect();
+    m.poly(&core, 2);
+    model("enemy.common.wasp", (16, 32), &[("yaw", 16.0), ("roll", 3.0), ("roll_max_deg", 40.0)], m)
+}
+
+/// GANNET: a captured attack drone with gull wings in a flattened M, kinked back at the elbows,
+/// a short fat pod body, a fan tail, bomb pods under the elbows, crystal spikes at the wing roots and a
+/// crystal eye. 60 px span, 40 long.
+pub fn gannet() -> ModelFile {
+    let mut m = Mesh::new(vec![hull(), crystal(), hull_dark(), Material::glow(HOT)]);
+    m.tube([0.0, -8.0, 3.0], [0.0, 12.0, 3.0], 5.0, 6, 0, 0);
+    m.shard([0.0, 12.0, 3.0], [0.0, 19.0, 2.0], 5.0, 0);
+    // Inner and outer wing panels: up to the elbow, back down to the tip.
+    m.sym(&[[4.0, 8.0, 4.0], [17.0, 0.0, 8.0], [17.0, -8.0, 7.0], [4.0, -4.0, 3.0]], 0);
+    m.sym(&[[17.0, 0.0, 8.0], [30.0, 6.0, 2.0], [29.0, 1.0, 1.5], [17.0, -8.0, 7.0]], 0);
+    m.sym(&[[0.0, -8.0, 3.0], [6.0, -17.0, 2.0], [0.0, -15.0, 2.5]], 0);
+    for sx in [-1.0, 1.0] {
+        m.tube([sx * 17.0, -2.0, 3.0], [sx * 17.0, -12.0, 3.0], 2.5, 6, 2, 2);
+        m.shard([sx * 5.0, 4.0, 5.0], [sx * 9.0, 10.0, 10.0], 2.0, 1);
+    }
+    m.poly(&[[0.0, 16.0, 6.5], [1.5, 13.0, 6.8], [0.0, 11.0, 7.2], [-1.5, 13.0, 6.8]], 3);
+    model("enemy.s1.gannet", (36, 72), &[("yaw", 16.0), ("pitch", 5.0), ("pitch_max_deg", 50.0)], m)
+}
+
+/// SKIFF: a captured harbour patrol boat: pointed bow, darker deck, a wheelhouse overgrown with crystal,
+/// one deck gun forward. 52 px long, 16 wide (the wake is a separate VFX).
+pub fn skiff() -> ModelFile {
+    let mut m = Mesh::new(vec![hull(), hull_dark(), crystal(), weapon(), Material::glow(HOT)]);
+    let deck = [
+        [0.0, 26.0, 5.0], [6.0, 14.0, 5.0], [8.0, 0.0, 5.0], [7.0, -24.0, 5.0], [6.0, -26.0, 5.0],
+        [-6.0, -26.0, 5.0], [-7.0, -24.0, 5.0], [-8.0, 0.0, 5.0], [-6.0, 14.0, 5.0],
+    ];
+    let water: Vec<V3> = deck.iter().map(|p| [p[0] * 0.75, p[1] * 0.94, -1.0]).collect();
+    m.loft(&deck, &water, 0);
+    // The deck rises to a centre ridge: each fan facet faces its own way and catches the light.
+    let mut top = vec![[0.0, 0.0, 8.0]];
+    top.extend_from_slice(&deck);
+    top.push(deck[0]);
+    m.poly(&top, 0);
+    m.frustum([-5.0, -10.0, 7.0], [5.0, 2.0, 7.0], 1.5, 12.0, 1);
+    m.shard([0.0, -4.0, 11.0], [2.0, -1.0, 16.0], 3.0, 2);
+    m.shard([-2.0, -7.0, 11.0], [-4.0, -9.0, 15.0], 2.5, 2);
+    m.tube([0.0, 14.0, 5.0], [0.0, 14.0, 8.0], 3.0, 6, 3, 3);
+    m.tube([0.0, 15.0, 7.0], [0.0, 24.0, 7.0], 1.0, 5, 3, 4);
+    model("enemy.s1.skiff", (28, 56), &[("yaw", 16.0)], m)
+}
+
+/// PILLBOX: a round concrete drum with a chamfered roof, a turret ring with twin barrels, and crystal
+/// grown through the back of the roof. 40 px across.
+pub fn pillbox() -> ModelFile {
+    let mut m = Mesh::new(vec![hull(), hull_dark(), weapon(), crystal(), Material::glow(HOT)]);
+    let rings = [(20.0, 0.0), (20.0, 5.0), (16.0, 9.0)];
+    for w in rings.windows(2) {
+        m.loft(&Mesh::ring(12, w[0].0, w[0].1, 0.0), &Mesh::ring(12, w[1].0, w[1].1, 0.0), 0);
+    }
+    m.loft(&Mesh::ring(12, 16.0, 9.0, 0.0), &Mesh::ring(12, 10.0, 9.0, 0.0), 0);
+    m.loft(&Mesh::ring(12, 10.0, 9.0, 0.0), &Mesh::ring(12, 10.0, 12.0, 0.0), 1);
+    // A shallow faceted dome on the turret.
+    let mut dome = vec![[0.0, 0.0, 16.0]];
+    let rim = Mesh::ring(12, 10.0, 12.0, 0.0);
+    dome.extend_from_slice(&rim);
+    dome.push(rim[0]);
+    m.poly(&dome, 0);
+    for x in [-3.0, 3.0] {
+        m.tube([x, 2.0, 11.0], [x, 20.0, 11.0], 1.4, 5, 2, 4);
+    }
+    m.shard([-5.0, -9.0, 9.0], [-8.0, -14.0, 15.0], 3.0, 3);
+    m.shard([2.0, -11.0, 9.0], [4.0, -16.0, 14.0], 2.5, 3);
+    m.shard([6.0, -7.0, 9.0], [10.0, -10.0, 13.0], 2.0, 3);
+    model("enemy.common.pillbox", (22, 44), &[("yaw", 16.0)], m)
+}
+
+/// Door poses of the HATCH, closed to open.
+pub const HATCH_POSES: usize = 6;
+
+/// HATCH: a square armoured frame; two doors slide apart (pose `k` of [`HATCH_POSES`]) over a shaft with
+/// a glowing crystal nest. Hazard strips on the doors' leading edges. 40 px square.
+pub fn hatch(k: usize) -> ModelFile {
+    let mut m = Mesh::new(vec![hull(), hull_dark(), Material::lit(&[DARK, LIGHT], 0.75, 0), crystal(), Material::glow(HOT)]);
+    let sq = |h: f64, z: f64| -> Vec<V3> { vec![[-h, -h, z], [h, -h, z], [h, h, z], [-h, h, z]] };
+    m.loft(&sq(20.0, 0.0), &sq(18.0, 4.0), 0);
+    m.loft(&sq(18.0, 4.0), &sq(14.0, 4.0), 0);
+    m.loft(&sq(14.0, 4.0), &sq(14.0, -12.0), 1);
+    m.poly(&sq(14.0, -12.0), 3);
+    for (x, y, tx, ty) in [(0.0, 0.0, 0.0, 0.0), (-6.0, 5.0, -9.0, 8.0), (6.0, -5.0, 9.0, -8.0), (5.0, 6.0, 8.0, 10.0), (-5.0, -6.0, -8.0, -10.0)] {
+        m.shard([x, y, -12.0], [tx, ty, -3.0], 3.5, 3);
+    }
+    m.poly(&Mesh::ring(6, 3.0, -4.0, 0.0), 4);
+    let dx = 14.0 * k as f64 / (HATCH_POSES - 1) as f64;
+    for s in [-1.0, 1.0] {
+        // The door retracts under the frame: it never shows beyond the frame's outer edge.
+        let (inner, outer) = (s * dx, s * (14.0 + dx).min(18.0));
+        let (lo, hi) = if s < 0.0 { (outer, inner) } else { (inner, outer) };
+        m.cuboid([lo, -14.0, 1.5], [hi, 14.0, 3.0], 1);
+        let (sl, sh) = if s < 0.0 { (inner - 3.0, inner) } else { (inner, inner + 3.0) };
+        m.cuboid([sl, -14.0, 3.0], [sh, 14.0, 3.4], 2);
+    }
+    model(&format!("enemy.common.hatch.open{k}"), (22, 44), &[], m)
+}
+
+/// CRAWLER: a squat captured tank: two wide tracks, a boxy hull with a sloped glacis, one fixed forward
+/// gun, a crystal cluster on the engine deck. 44 px long, 38 wide.
+pub fn crawler() -> ModelFile {
+    let mut m = Mesh::new(vec![hull(), hull_dark(), crystal(), weapon(), Material::glow(HOT)]);
+    for s in [-1.0, 1.0] {
+        let (a, b) = if s < 0.0 { (-19.0, -11.0) } else { (11.0, 19.0) };
+        m.cuboid([a, -22.0, 0.0], [b, 20.0, 8.0], 1);
+    }
+    m.frustum([-11.0, -20.0, 4.0], [11.0, 16.0, 4.0], 3.0, 13.0, 0);
+    m.poly(&[[-8.0, 13.0, 13.0], [8.0, 13.0, 13.0], [11.0, 22.0, 5.0], [-11.0, 22.0, 5.0]], 0);
+    m.sym(&[[8.0, 13.0, 13.0], [11.0, 16.0, 4.0], [11.0, 22.0, 5.0]], 0);
+    m.tube([0.0, 14.0, 11.0], [0.0, 27.0, 11.0], 2.0, 6, 3, 4);
+    m.shard([-4.0, -12.0, 13.0], [-6.0, -18.0, 20.0], 3.0, 2);
+    m.shard([3.0, -13.0, 13.0], [5.0, -19.0, 19.0], 3.0, 2);
+    m.shard([0.0, -8.0, 13.0], [0.0, -10.0, 22.0], 2.5, 2);
+    model("enemy.common.crawler", (32, 64), &[("yaw", 16.0)], m)
+}
+
+/// KEELBREAKER: a captured destroyer, 256 lines long and about 52 wide: pointed bow, square stern, a
+/// stepped bridge crowned with a faceted crystal, a funnel, three turret bases (the turrets are a
+/// separate part), crystal grown through the deck seams. Rolls gently in the swell.
+pub fn keelbreaker() -> ModelFile {
+    let mut m = Mesh::new(vec![
+        hull(),
+        hull_dark(),
+        crystal(),
+        Material::lit(&[VOID, DARK, LIGHT], 0.55, 1),
+        Material::glow(HOT),
+    ]);
+    let deck = [
+        [0.0, 128.0, 10.0], [14.0, 100.0, 10.0], [25.0, 60.0, 10.0], [26.0, 0.0, 10.0], [25.0, -100.0, 10.0], [22.0, -128.0, 10.0],
+        [-22.0, -128.0, 10.0], [-25.0, -100.0, 10.0], [-26.0, 0.0, 10.0], [-25.0, 60.0, 10.0], [-14.0, 100.0, 10.0],
+    ];
+    let water: Vec<V3> = deck.iter().map(|p| [p[0] * 0.86, p[1] * 0.96, -6.0]).collect();
+    m.loft(&deck, &water, 0);
+    // A low pyramid deck: long facets from the edges up to the centre catch the light differently.
+    let mut top = vec![[0.0, 0.0, 18.0]];
+    top.extend_from_slice(&deck);
+    top.push(deck[0]);
+    m.poly(&top, 0);
+    m.frustum([-14.0, 0.0, 10.0], [14.0, 40.0, 10.0], 3.0, 24.0, 3);
+    m.frustum([-9.0, 6.0, 24.0], [9.0, 32.0, 24.0], 2.0, 32.0, 3);
+    m.shard([0.0, 20.0, 32.0], [0.0, 26.0, 44.0], 6.0, 2);
+    m.shard([-5.0, 14.0, 32.0], [-9.0, 10.0, 40.0], 4.0, 2);
+    m.shard([5.0, 14.0, 32.0], [9.0, 10.0, 40.0], 4.0, 2);
+    m.tube([0.0, -14.0, 14.0], [0.0, -14.0, 28.0], 6.0, 6, 3, 1);
+    for y in [86.0, -40.0, -92.0] {
+        m.tube([0.0, y, 12.0], [0.0, y, 18.0], 12.0, 8, 1, 1);
+    }
+    for y in [-112.0, -66.0, 52.0, 108.0] {
+        for sx in [-1.0, 1.0] {
+            m.shard([sx * 15.0, y, 12.0], [sx * 18.0, y + 4.0, 21.0], 3.0, 2);
+        }
+    }
+    // Authored on a 256-line hull; shown at 94 % so the bow and stern clear the canvas.
+    for v in m.verts.iter_mut() {
+        v[1] *= 0.94;
+    }
+    model("midboss.s1.keelbreaker", (32, 256), &[("roll", 5.0), ("roll_max_deg", 8.0)], m)
+}
+
+/// A KEELBREAKER turret (the part sprite): a domed ring with twin barrels and glowing muzzles.
+pub fn keelbreaker_turret() -> ModelFile {
+    let mut m = Mesh::new(vec![hull(), weapon(), Material::glow(HOT)]);
+    m.loft(&Mesh::ring(8, 9.0, 0.0, PI / 8.0), &Mesh::ring(8, 7.0, 5.0, PI / 8.0), 0);
+    m.poly(&Mesh::ring(8, 7.0, 5.0, PI / 8.0), 0);
+    for x in [-2.5, 2.5] {
+        m.tube([x, 4.0, 3.5], [x, 13.0, 3.5], 1.2, 5, 1, 2);
+    }
+    model("midboss.s1.keelbreaker.turret", (16, 32), &[("yaw", 16.0)], m)
+}
+
+/// The TALON (the S1 ship; the user picked it over the Ludo model), hand-built to its approved silhouette: a knife-edge
+/// arrowhead nose, a narrow chiselled fuselage, wings swept steeply back that hook forward into claw
+/// tips, one raked tail blade, twin nozzles. 64 px long.
+pub fn talon() -> ModelFile {
+    let mut m = Mesh::new(vec![
+        Material::lit(&[VOID, DARK, LIGHT], 1.0, 2),
+        Material::lit(&[VOID, DARK, LIGHT], 0.6, 2),
+        Material::lit(&[DARK, LIGHT, HOT], 0.8, 1),
+        Material::glow(HOT),
+    ]);
+    let nose = [0.0, 31.0, 2.0];
+    let (c0, c1, c2, tail) = ([0.0, 18.0, 6.0], [0.0, 4.0, 7.0], [0.0, -20.0, 6.0], [0.0, -28.0, 4.0]);
+    let (s0, s1, s2, s3) = ([3.0, 22.0, 2.0], [5.0, 8.0, 3.0], [5.0, -14.0, 3.0], [5.0, -28.0, 2.0]);
+    m.sym(&[nose, s0, c0], 0);
+    m.sym(&[c0, s0, s1, c1], 0);
+    m.sym(&[c1, s1, s2, c2], 0);
+    m.sym(&[c2, s2, s3, tail], 0);
+    m.sym(&[nose, [0.0, 18.0, -1.0], s0], 1);
+    m.sym(&[[0.0, 18.0, -1.0], [0.0, -24.0, -1.0], s2, s1, s0], 1);
+    m.poly(&[[0.0, 16.0, 6.4], [1.6, 9.0, 6.8], [0.0, 2.0, 7.3], [-1.6, 9.0, 6.8]], 2);
+    // Wings swept back, the tips hooking forward into claws; dark leading edges.
+    m.sym(&[s1, [22.0, -12.0, 1.5], [12.0, -18.0, 2.5], s2], 0);
+    m.sym(&[[22.0, -12.0, 1.5], [29.0, -3.0, 0.5], [26.0, -15.0, 0.8], [12.0, -18.0, 2.5]], 0);
+    m.sym(&[s1, [6.0, 10.0, 3.6], [23.0, -10.0, 2.0], [22.0, -12.0, 1.5]], 1);
+    m.beam([0.0, -14.0, 6.0], [0.0, -30.0, 14.0], 2.5, 3.0, 1);
+    for x in [-2.5, 2.5] {
+        m.tube([x, -26.0, 3.0], [x, -31.0, 3.0], 2.0, 6, 1, 3);
+    }
+    model("hd.ship.talon", (36, 66), &[("roll", 9.0), ("roll_max_deg", 60.0)], m)
 }
 
 fn model(name: &str, canvas: (u16, u16), orient: &[(&str, f64)], mesh: Mesh) -> ModelFile {
@@ -148,6 +394,23 @@ pub fn gantry_queen() -> ModelFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// No hand model may touch its canvas edge at any orientation (that would be clipping).
+    #[test]
+    fn every_model_fits_at_every_orientation() {
+        let mut bad = Vec::new();
+        for (id, m) in all() {
+            for (i, img) in m.render_all().iter().enumerate() {
+                let (w, h) = (img.w, img.h);
+                let edge = (0..w).any(|x| img.get(x, 0).is_some() || img.get(x, h - 1).is_some())
+                    || (0..h).any(|y| img.get(0, y).is_some() || img.get(w - 1, y).is_some());
+                if edge || img.pixels.iter().all(|p| p.is_none()) {
+                    bad.push(format!("{id}#{i}"));
+                }
+            }
+        }
+        assert!(bad.is_empty(), "clipped or empty: {bad:?}");
+    }
 
     #[test]
     fn queen_fits_its_canvas_and_budget() {

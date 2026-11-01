@@ -136,3 +136,37 @@ Ludo GLB stays in `assets/ludo/boss.s1.gantry_queen/` as a record; the bible blo
   hot 16 % (at full scale).
 - C64U (`talonhd.prg` `7dbe3ef8b5218e52…`, `talonhd.reu` `42719c0a3ed191b7…`): accepted on the first run; 9.7–14.6
   ms per frame; held frame t=540 → **0 mismatched bytes**.
+
+## 2026-10-31 — The S1 roster, hand-built
+
+Bible: S1 models rev 6 (every S1 entity `generator = "hand"`; canvases sized to hold each object at any yaw;
+KEELBREAKER 256 × ~52, parts resized); palette law rev 5 (triangle floors lowered for hand models).
+
+`src/hand.rs`:
+
+| Model | Triangles | Frames | REU bytes | Light share |
+|---|---|---|---|---|
+| WASP | 16 | 48 (16 yaw × 3 bank) | 34,474 | 0 % |
+| GANNET | 84 | 80 (16 yaw × 5 dive pitch) | 157,046 | 13 % |
+| SKIFF | 81 | 16 | 23,961 | 11 % |
+| PILLBOX | 152 | 16 | 28,526 | 10 % |
+| HATCH | 98 | 6 door poses | ~2,000 each | 0 % |
+| CRAWLER | 70 | 16 | 37,688 | 3 % |
+| KEELBREAKER hull | 201 | 5 (roll) | 54,905 | 11 % |
+| KEELBREAKER turret | 54 | 16 | 12,928 | — |
+| TALON (the S1 ship) | 88 | 9 | 21,383 | 60 % |
+
+Every enemy is within the ≤ 15 % light rule.
+
+- `every_model_fits_at_every_orientation`: no model touches its canvas edge at any orientation. It caught
+  four clipping models and a HATCH bug (the doors slid out past the frame).
+- Art direction from the lineup review (`talonhd lineup` → `output/lineup/s1.png`):
+  - Void/dark-checker hull tops read as holes over S1's blue sea. Main hulls are now void/dark/light at
+    albedo 0.6 with a solid-dark floor; secondary parts are solid dark.
+  - Flat decks read flat, so decks and domes are faceted (raised centre fans).
+- Tech scene: the hand WASP flies the drone paths. C64U (`talonhd.reu` `a8f8fa575110fba5…`): 9.1–9.6 ms per frame;
+  held frame t=222 → **0 mismatched bytes**.
+- The user picked the hand-built TALON over the Ludo model (`hd.ship.talon` rev 4, `generator = "hand"`); it is
+  now `assets/models/hd.ship.talon.mesh` and the tech scene's player. Bake self-check: model matches the
+  reference compositor; `talonhd.reu` `c093208f78bb704c…` (3.88 MB, 23.1 % of 16 MiB). Renderer and PRG
+  unchanged, not re-run on the C64U.

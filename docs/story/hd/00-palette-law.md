@@ -3,7 +3,7 @@ id = "hd.rules"
 kind = "hd_rules"
 name = "PALETTE LAW"
 status = "approved"
-revision = 4
+revision = 5
 
 # The four global multicolor codes and their roles. Every pixel on screen is one of these four.
 [roles]
@@ -46,10 +46,10 @@ facet_size = 12           # a face should average >= 12 on-screen pixels at the 
 
 # Size classes: canvas in multicolor pixels (one pixel = 2 hires px wide, 1 line tall), triangle budget.
 [size_classes]
-S = { max_canvas = 32, tris = [40, 120] }
-M = { max_canvas = 80, tris = [120, 300] }
-L = { max_canvas = 128, tris = [300, 700] }
-XL = { max_canvas = 256, tris = [700, 1500] }
+S = { max_canvas = 32, tris = [20, 120] }
+M = { max_canvas = 80, tris = [60, 300] }
+L = { max_canvas = 128, tris = [150, 700] }
+XL = { max_canvas = 256, tris = [300, 1500] }
 BOSS = { max_canvas = 512, tris = [500, 4000] }
 
 [light_share]
@@ -117,10 +117,10 @@ boss that shares the same four colors. The bake measures it and fails over budge
 
 | Class | Canvas (multicolor px) | Triangles | Typical |
 |---|---|---|---|
-| S | ≤ 32 | 40-120 | WASP, bullets' carriers, debris |
-| M | ≤ 80 | 120-300 | the player's ship, GANNET, CRAWLER |
-| L | ≤ 128 | 300-700 | heavy units, ground emplacements |
-| XL | ≤ 256 | 700-1500 | midbosses |
+| S | ≤ 32 | 20-120 | WASP, bullets' carriers, debris |
+| M | ≤ 80 | 60-300 | the player's ship, GANNET, CRAWLER |
+| L | ≤ 128 | 150-700 | heavy units, ground emplacements |
+| XL | ≤ 256 | 300-1500 | midbosses |
 | BOSS | ≤ 512 | 500-4000 | stage bosses: always bigger than the screen |
 
 A multicolor pixel is two hires pixels wide, so a 512-pixel canvas is 1024 hires pixels across: more than
@@ -134,3 +134,4 @@ three screens wide.
 - rev 2 (2026-10-31): M canvas limit 64 -> 80 so the longest player ships fit (number fix with the ship canvases)
 - rev 3 (2026-10-31): player hull floor is solid dark (art-direction review of the TALON pilot)
 - rev 4 (2026-10-31): BOSS triangle floor 1500 -> 500 (hand-built bosses are lean on purpose)
+- rev 5 (2026-10-31): triangle floors halved or more for every class (hand-built models are lean on purpose)

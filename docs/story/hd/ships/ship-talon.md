@@ -6,7 +6,7 @@ prototype = 9
 stage = "stage.s1"
 base = "ship.talon"
 status = "approved"
-revision = 3
+revision = 4
 crystal = "none"
 identity = "a sleek predatory white retro-future interceptor, knife-edge nose, raptor-claw wingtips, narrow angular light blue canopy slit"
 silhouette = "long arrowhead nose, narrow chiselled fuselage, wings swept steeply back hooking forward into claw tips, one raked tail blade, twin nozzles"
@@ -20,9 +20,9 @@ hitbox = { w = 4, h = 4 }
 size_class = "M"
 canvas = [36, 66]
 length_px = 64
-tris = 200
+tris = 90
 orient = { roll = 9, roll_max_deg = 60 }
-ludo = { generator = "hero", rig = false, texture = "simple" }
+ludo = { generator = "hand", rig = false, texture = "none" }
 
 [[model.materials]]
 name = "hull"
@@ -73,3 +73,5 @@ The XF-9 from the base bible, unchanged in shape: the approved silhouette is the
 - Decision: approved (whole HD layer approved at once, "Approve all, start Ludo")
 - rev 2 (2026-10-31): canvas height raised to length_px + 2 (rev 1 canvases were shorter than the ships; a number error, no design change)
 - rev 3 (2026-10-31): hull floors 1 -> 2 (shadow side stops at solid dark; art-direction review of the TALON pilot)
+- rev 4 (2026-10-31): `generator = "hand"`, tris 200 -> 90; the user picked the hand-built TALON (`src/hand.rs`)
+  over the Ludo model after the S1 lineup review. The Ludo GLB stays in `assets/ludo/hd.ship.talon/`.

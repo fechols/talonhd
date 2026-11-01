@@ -6,6 +6,7 @@
 //! talonhd compare [--reu FILE] --dump DIR [--t N]
 //! talonhd bake-model <file.mesh> [--palette v,d,l,h] [--out PNG]   orientation sheet + light share
 //! talonhd hand-models                                             write the hand-built models' .mesh files
+//! talonhd lineup [--palette v,d,l,h] [--out PNG]                 the roster at C64 size on the stage's void
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -45,6 +46,7 @@ fn main() -> ExitCode {
         "compare" => cmd_compare(&args),
         "bake-model" => cmd_bake_model(&argv[1..]),
         "hand-models" => cmd_hand_models(),
+        "lineup" => cmd_lineup(&args),
         other => Err(format!("unknown command {other}")),
     };
     match result {
@@ -266,5 +268,62 @@ fn cmd_hand_models() -> Result<(), String> {
         write(&path, mesh::to_text(&m).as_bytes())?;
         println!("{id}: {} triangles, {} vertices -> {}", m.mesh.tris.len(), m.mesh.verts.len(), path.display());
     }
+    Ok(())
+}
+
+/// The art direction's review sheet: every model in `assets/models` at C64 size, a few orientations
+/// each, on the stage's void color (as in the game), scaled 3x.
+fn cmd_lineup(args: &Args) -> Result<(), String> {
+    let pal: Vec<u8> = args.opt("--palette").unwrap_or("6,12,1,3").split(',').map(|c| c.trim().parse::<u8>().map_err(|_| format!("bad color {c}"))).collect::<Result<_, _>>()?;
+    let palette = render::Palette::new(pal[0], pal[1], pal[2], pal[3]);
+    let out = args.path("--out", "output/lineup/s1.png");
+    let mut paths: Vec<PathBuf> = std::fs::read_dir("assets/models").map_err(|e| e.to_string())?.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "mesh")).collect();
+    paths.sort();
+    // Rows of (name, frames); each model shows up to 4 evenly spaced orientations.
+    let mut rows: Vec<Vec<talonhd::encode::SpriteImage>> = Vec::new();
+    let mut names = Vec::new();
+    for p in &paths {
+        let m = mesh::load(p)?;
+        if m.canvas.0 > 128 {
+            continue; // bosses get their own sheets
+        }
+        let all = m.render_all();
+        let n = all.len();
+        let pick: Vec<usize> = if n <= 4 { (0..n).collect() } else { (0..4).map(|k| k * (n - 1) / 3).collect() };
+        rows.push(pick.into_iter().map(|i| all[i].clone()).collect());
+        names.push(m.name.clone());
+    }
+    let pad = 4usize;
+    let cell_w = rows.iter().flatten().map(|f| f.w as usize).max().unwrap_or(1) + pad;
+    let width = rows.iter().map(|r| r.len() * cell_w).max().unwrap_or(1) + pad;
+    let heights: Vec<usize> = rows.iter().map(|r| r.iter().map(|f| f.h as usize).max().unwrap_or(0) + pad).collect();
+    let height: usize = heights.iter().sum::<usize>() + pad;
+    let void = talonhd::palette::PALETTE[palette.d021 as usize];
+    let mut px = vec![void; width * height];
+    let mut y0 = pad;
+    for (r, row) in rows.iter().enumerate() {
+        for (k, f) in row.iter().enumerate() {
+            let x0 = pad + k * cell_w;
+            for y in 0..f.h as usize {
+                for x in 0..f.w as usize {
+                    if let Some(c) = f.get(x as u16, y as u16) {
+                        px[(y0 + y) * width + x0 + x] = talonhd::palette::PALETTE[palette.color_of(c) as usize];
+                    }
+                }
+            }
+        }
+        println!("row {r}: {}", names[r]);
+        y0 += heights[r];
+    }
+    // 3x, with multicolor pixels twice as wide.
+    let (sw, sh) = (width * 6, height * 3);
+    let mut big = vec![[0u8; 3]; sw * sh];
+    for y in 0..sh {
+        for x in 0..sw {
+            big[y * sw + x] = px[(y / 3) * width + x / 6];
+        }
+    }
+    png::save(&out, sw as u32, sh as u32, &big)?;
+    println!("wrote {}", out.display());
     Ok(())
 }

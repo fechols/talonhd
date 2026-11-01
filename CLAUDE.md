@@ -87,16 +87,17 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
 - **Models** (`src/mesh.rs`): `.mesh` text files from `tools/model_prep.py` (Ludo GLB → paint classes by
   normalized luminance + chroma → QEM decimation to the bible's triangle count → model space, x right, y nose,
   z up, hires px). Materials carry roles and an albedo from their paint.
-- **Hand models** (`src/hand.rs`): geometry the art director builds when a Ludo model reads badly from straight
-  above (bible `generator = "hand"`); `cargo run --release -- hand-models` writes their `.mesh` files. The GANTRY
-  QUEEN is one.
+- **Hand models** (`src/hand.rs`): the default for TALON HD (the user prefers them to Ludo's). The GANTRY QUEEN and
+  the whole S1 roster, TALON included, are hand-built; `cargo run --release -- hand-models` writes their `.mesh` files, `lineup`
+  renders the review sheet, and `every_model_fits_at_every_orientation` guards against clipping. Enemy hulls:
+  void/dark/light at albedo ~0.6 with a solid-dark floor (no void checker over the sea); faceted tops.
 - **Sprite format:** column segments are Run, Mix or Skip (`SEG_SKIP`: subtract a gap from DATA, so holes cost no
   REU bytes). The Rust `draw_column`, `asm/blit.S` and `tools/test_blit.py` change together.
-- **Tech scene** (`src/demo.rs`, shared, integer-only; `src/models.rs`, host): S1 palette; the Ludo TALON and the
-  hand-built GANTRY QUEEN (`assets/models/*.mesh`) when present, 49 roll frames, fine sine sway; procedural
+- **Tech scene** (`src/demo.rs`, shared, integer-only; `src/models.rs`, host): S1 palette; the hand-built TALON and
+  GANTRY QUEEN (`assets/models/*.mesh`) when present, 49 roll frames, fine sine sway; procedural
   stand-ins (not game content) for the drones, the panorama and, as a fallback, the boss.
 - **Boot:** the PRG erases the REU magic, then waits for magic + whole-image checksum, so `run` then `upload-reu`
   always starts on the complete new image.
-- **Next:** the rest of the S1 roster from Ludo (WASP, GANNET, SKIFF, PILLBOX, HATCH, CRAWLER, KEELBREAKER),
-  the GANTRY QUEEN's separate legs/arms parts, then the TALON simulation.
+- **Next:** a faceted CRAWLER top, the GANTRY QUEEN's separate leg/arm parts, the S1
+  panorama (sea, docks, airfield) in the S1 palette, then the TALON simulation.
 - **Hardware quirk:** `c64u.py run` right after `config` can reset the machine before the PRG loads; run again.

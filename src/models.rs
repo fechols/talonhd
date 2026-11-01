@@ -24,6 +24,7 @@ pub const DEMO_PALETTE: Palette = Palette::new(6, 12, 1, 3);
 /// The approved S1 ship and boss, if their prepared models exist (`tools/model_prep.py`).
 pub const TALON_MESH: &str = "assets/models/hd.ship.talon.mesh";
 pub const QUEEN_MESH: &str = "assets/models/boss.s1.gantry_queen.mesh";
+pub const WASP_MESH: &str = "assets/models/enemy.common.wasp.mesh";
 
 /// The player's stand-in fighter: nose +y, about 64 long, 60 across.
 pub fn fighter() -> Mesh {
@@ -149,8 +150,8 @@ fn banks(n: u16, max: f64) -> impl Iterator<Item = f64> {
     (0..n).map(move |i| (i as f64 / (n - 1) as f64 * 2.0 - 1.0) * max)
 }
 
-/// The tech scene with the Ludo TALON as the player's ship and the Ludo GANTRY QUEEN as the boss when
-/// their meshes are present.
+/// The tech scene with the hand-built TALON as the player's ship and the hand-built GANTRY QUEEN as the
+/// boss when their meshes are present.
 pub fn demo_frames_with_assets() -> Vec<SpriteImage> {
     let mut frames = demo_frames();
     if let Ok(m) = crate::mesh::load(std::path::Path::new(QUEEN_MESH)) {
@@ -159,6 +160,14 @@ pub fn demo_frames_with_assets() -> Vec<SpriteImage> {
         for (i, f) in rendered.into_iter().enumerate() {
             assert_eq!((f.w, f.h), (demo::BOSS_SIZE, demo::BOSS_SIZE));
             frames[demo::BOSS_FRAME as usize + i] = f;
+        }
+    }
+    if let Ok(m) = crate::mesh::load(std::path::Path::new(WASP_MESH)) {
+        // The hand-built WASP flies the drone paths: its 16 yaws, level (on the stand-in's canvas).
+        let view = View::centered(demo::DRONE_W, demo::DRONE_H, 1.0);
+        for i in 0..demo::DRONE_YAWS {
+            let yaw = PI + i as f64 * 2.0 * PI / demo::DRONE_YAWS as f64;
+            frames[(demo::DRONE_FRAME + i) as usize] = raster3d::render(&m.mesh, Orient { yaw, pitch: 0.0, roll: 0.0 }, view);
         }
     }
     if let Ok(m) = crate::mesh::load(std::path::Path::new(TALON_MESH)) {
