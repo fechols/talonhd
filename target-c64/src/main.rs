@@ -15,6 +15,7 @@
 use core::ptr::{read_volatile, write_volatile};
 
 use talonhd::game::{self, Game};
+use talonhd::paging;
 use talonhd::hw::Hw;
 use talonhd::sim::{self, world::GAME_OVER};
 use talonhd::layout::{self, BUFFERS, status};
@@ -100,6 +101,56 @@ fn in_vblank(c: &mut C64) -> bool {
     !(40..251).contains(&r)
 }
 
+unsafe extern "C" {
+    /// Load image and length of each paged phase (`link.ld`), in `paging` id order.
+    static __phase_boss_load_start: u8;
+    static __phase_boss_size: u8;
+    static __phase_attract_load_start: u8;
+    static __phase_attract_size: u8;
+}
+
+/// The phase in the window (0xFF: none).
+static mut CURRENT_PHASE: u8 = 0xFF;
+
+/// Phase `p`'s load image address and length in the PRG.
+fn phase_image(p: u8) -> (u16, u16) {
+    unsafe {
+        if p == paging::BOSS {
+            (&raw const __phase_boss_load_start as u16, &raw const __phase_boss_size as u16)
+        } else {
+            (&raw const __phase_attract_load_start as u16, &raw const __phase_attract_size as u16)
+        }
+    }
+}
+
+/// Copy every phase image from the PRG's load image to its REU slot. Runs first in `main`: the images
+/// sit in frame-buffer and HUD space that boot overwrites soon after.
+#[inline(never)]
+fn stash_phases(c: &mut C64) {
+    for p in 0..paging::PHASES {
+        let (at, len) = phase_image(p);
+        talonhd::hw::stash(c, at, paging::REU_PHASES + p as u32 * paging::PHASE_SLOT, len);
+    }
+}
+
+/// `paging::page` on the C64: fetch phase `p` into the window unless it is there already. Called from
+/// the game step, which runs with I/O banked out: bank it in for the REU registers, then restore.
+#[unsafe(no_mangle)]
+pub extern "C" fn talonhd_page(p: u8) {
+    let c = &mut C64;
+    unsafe {
+        if CURRENT_PHASE == p {
+            return;
+        }
+        CURRENT_PHASE = p;
+    }
+    let port = c.peek(0x0001);
+    c.poke(0x0001, 0x35);
+    let (_, len) = phase_image(p);
+    talonhd::hw::fetch(c, paging::REU_PHASES + p as u32 * paging::PHASE_SLOT, paging::WINDOW, len);
+    c.poke(0x0001, port);
+}
+
 /// The input byte (talon::sim UP DOWN LEFT RIGHT FIRE ARM): joystick port 2 from CIA1 port A, ARM from
 /// SPACE (keyboard row 7, column 4), as TALON reads them (no POTX second button here).
 #[inline(never)]
@@ -131,6 +182,7 @@ fn status_poke16(c: &mut C64, offset: u16, value: u16) {
 #[unsafe(no_mangle)]
 pub extern "C" fn main() -> i16 {
     let c = &mut C64;
+    stash_phases(c);
     // 64 MHz with badlines off (C64U turbo registers); harmless elsewhere.
     c.poke(0xD031, 0x8F);
     c.poke(0xD011, 0x0B); // blank while setting up
@@ -264,7 +316,12 @@ pub extern "C" fn main() -> i16 {
             // The step runs with I/O banked out: the boss code lives in the RAM under $D000 (it and
             // everything it calls are pure computation; the HUD IRQ banks I/O in for itself).
             c.poke(0x0001, 0x34);
-            let input = if human { stick } else { sim::replay::autopilot(&g.world) };
+            let input = if human {
+                stick
+            } else {
+                paging::page(paging::ATTRACT);
+                sim::replay::autopilot(&g.world)
+            };
             g.step(input);
             c.poke(0x0001, 0x35);
         }

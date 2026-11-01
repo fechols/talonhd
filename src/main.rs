@@ -108,7 +108,8 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         ("drone", demo::DRONE_FRAME, demo::DRONE_YAWS),
         ("player", demo::PLAYER_FRAME, demo::PLAYER_BANKS),
         ("gannet", demo::GANNET_FRAME, 2 * demo::GANNET_PITCHES),
-        ("shots", demo::PAIR_FRAME, demo::FRAMES - demo::PAIR_FRAME),
+        ("shots", demo::PAIR_FRAME, demo::SHIELD_FRAME - demo::PAIR_FRAME),
+        ("shield", demo::SHIELD_FRAME, demo::PLAYER_BANKS * demo::SHIELD_STEPS),
     ];
     let mut total = pano.rows as usize * 320;
     println!("panorama: {} cell rows, {} bytes", pano.rows, total);

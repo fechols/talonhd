@@ -20,6 +20,8 @@ fn main() {
     println!("cargo:rerun-if-changed=link.ld");
     println!("cargo:rerun-if-env-changed=MOS_CLANG");
     // Pass -T to clang directly (not via -Wl) so it replaces the default script.
+    // Paged phases share the window's addresses (link.ld); region overflows are still reported.
+    println!("cargo:rustc-link-arg=-Wl,--no-check-sections");
     println!("cargo:rustc-link-arg=-T");
     println!("cargo:rustc-link-arg={}", root.join("link.ld").display());
     println!("cargo:rustc-link-arg=-Wl,-Map,{}", out.join("talonhd.map").display());

@@ -267,3 +267,18 @@ Beyond XSCROLL's ±4 the background DMA starts 8 bytes per column earlier or lat
 wrapped-in edge columns are filled with code 00, and sprites move 4 multicolor px per column; the reference
 compositor models both. Bake self-check adds the shake's +12 (two columns) and -8 (one column) frames.
 C64U: held frame tick 3556 (render 3.1 ms): **0 mismatched bytes**.
+
+## 2026-11-01 — REU code paging; the invincible TALON's energy wave
+
+- **Paging** (`src/paging.rs`, `link.ld`): phases linked at the `$9000-$9FFF` window, stashed from the PRG to
+  REU `$FF0000` at boot, fetched on demand. `BOSS` (3,843 B: the fight's step logic) and `ATTRACT` (1,649 B:
+  the autopilot); `sim::collide/gauge` moved under I/O. Main RAM free: 11 B -> 1.5 KB (now ~1.4 KB after
+  the shield). `--no-check-sections` as TALON (phases overlap by design).
+- Measured on the C64U: 9,011 ticks in 151.7 s = 59.4 per second: the machine runs at 60 Hz, so one tick per
+  frame is TALON's intended speed (the earlier "PAL, 17 % slow" note was wrong).
+- C64U: held frame tick 9633 (boss fight in attract: both phases paged every frame, render 9.0 ms):
+  **0 mismatched bytes**.
+- **Energy wave** (user: no blinking while invincible): 72 frames (9 banks × 8 steps, 48 × 88, 341 KB);
+  two wave fronts follow the hull's silhouette outward from a dotted glow. A first circular version read as
+  a peace sign and repeated every 2 steps; replaced. C64U: held frame tick 3797 (just respawned):
+  **0 mismatched bytes**; image 5.65 MB (33.7 %).

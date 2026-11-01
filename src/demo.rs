@@ -29,7 +29,11 @@ pub const BURST_FRAMES: u16 = 3;
 pub const BURST_FRAME: u16 = BOMB_FRAME + 1;
 pub const SPARK_FRAMES: u16 = 4;
 pub const SPARK_FRAME: u16 = BURST_FRAME + BURST_FRAMES;
-pub const FRAMES: u16 = SPARK_FRAME + SPARK_FRAMES;
+/// The invincible TALON (respawn and arming): each bank wrapped in energy waves that follow its
+/// silhouette outward, 8 steps per loop.
+pub const SHIELD_STEPS: u16 = 8;
+pub const SHIELD_FRAME: u16 = SPARK_FRAME + SPARK_FRAMES;
+pub const FRAMES: u16 = SHIELD_FRAME + PLAYER_BANKS * SHIELD_STEPS;
 
 pub const BOSS_SIZE: u16 = 512;
 /// Screen line of the boss canvas centre: it hovers at the top, mostly above the screen.
@@ -61,6 +65,8 @@ pub const BURST_W: u16 = 24;
 pub const BURST_H: u16 = 44;
 pub const SPARK_W: u16 = 6;
 pub const SPARK_H: u16 = 10;
+pub const SHIELD_W: u16 = 48;
+pub const SHIELD_H: u16 = 88;
 
 /// Lines in one period of the looping panorama: S1 BREAKWATER, 26 screens (the image has 200 more, a
 /// copy of the first 200, so every window is contiguous).

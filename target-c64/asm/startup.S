@@ -25,7 +25,7 @@ talonhd_boot:
     sta $ffff
     lda #$35
     sta $01
-    ; Copy the relocated code (.hitext, .midtext, .lowtext, .uptext, .iotext) from its load image ($4C00..., inside
+    ; Copy the relocated code (.hitext, .lowtext, .uptext, .iotext) from its load image ($4C00..., inside
     ; frame buffer 0's bank) to where it runs. Whole pages: every destination region is page-aligned
     ; and a whole number of pages long, so the tail of a last page is harmless padding.
     lda #<__hitext_load_start
@@ -44,25 +44,6 @@ talonhd_hitext_dst:
     bne 1b
     inc talonhd_hitext_src+2
     inc talonhd_hitext_dst+2
-    dex
-    bne 1b
-3:
-    lda #<__midtext_load_start
-    sta talonhd_midtext_src+1
-    lda #>__midtext_load_start
-    sta talonhd_midtext_src+2
-    ldx #<__midtext_pages
-    beq 3f
-    ldy #0
-1:
-talonhd_midtext_src:
-    lda $ffff,y
-talonhd_midtext_dst:
-    sta __midtext_start,y
-    iny
-    bne 1b
-    inc talonhd_midtext_src+2
-    inc talonhd_midtext_dst+2
     dex
     bne 1b
 3:

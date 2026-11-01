@@ -75,7 +75,16 @@ impl Game {
     pub fn step(&mut self, input: u8) {
         self.ticks = self.ticks.wrapping_add(1);
         self.world.step(input);
-        self.boss.step(&mut self.world);
+        // The fight logic is a paged phase (`crate::paging`): only paged in while she is around.
+        if lines(self) < crate::boss::ARRIVE {
+            if self.boss.state != crate::boss::ABSENT {
+                self.boss = Boss::default();
+            }
+            self.world.boss_ceiling = false;
+        } else {
+            crate::paging::page(crate::paging::BOSS);
+            self.boss.step(&mut self.world);
+        }
         let p = &mut self.pilot;
         let target = if self.world.state != PLAY {
             0
@@ -241,10 +250,15 @@ pub fn scene(g: &Game, out: &mut [Sprite; INSTANCES]) -> usize {
         }
     }
     let p = &w.player;
-    let blink = p.invuln_kind == INV_RESPAWN && p.invuln & 2 != 0;
-    if (w.state == PLAY || w.state == LAUNCH) && !blink {
-        let frame = PLAYER_FRAME + (g.pilot.bank + 4) as u16;
-        out[n] = place(frame, px, py, PLAYER_W, PLAYER_H, Z_PLAYER);
+    if w.state == PLAY || w.state == LAUNCH {
+        let bank = (g.pilot.bank + 4) as u16;
+        // Invincible (respawn or arming): the energy-wave frames instead of a blink.
+        out[n] = if p.invuln_kind != INV_NONE {
+            let step = (w.tick as u16 / 3) % SHIELD_STEPS;
+            place(SHIELD_FRAME + bank * SHIELD_STEPS + step, px, py, SHIELD_W, SHIELD_H, Z_PLAYER)
+        } else {
+            place(PLAYER_FRAME + bank, px, py, PLAYER_W, PLAYER_H, Z_PLAYER)
+        };
         n += 1;
     }
     for k in 0..EBULLETS {

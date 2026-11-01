@@ -106,6 +106,14 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   (`game::palette`, a color-RAM fill), the cab rim takes 120 HP (RING BURST, OFFSET RINGS, TRIPLE FAN);
   then 30,000 points, a chain of bursts, she sinks away and the stage scrolls on. Bullets go through
   `World::spawn_ebullet`, scores through `add_score`. `the_fight_runs_to_the_end` plays it through.
+- **REU code paging** (`src/paging.rs`, as TALON's phases): rarely active code is a *phase* linked at the
+  window `$9000-$9FFF`; the PRG carries the images, `main` stashes them first thing to REU `$FF0000` +
+  4 KiB × id, `paging::page(id)` fetches one when it is not current (banking I/O in if the step had it
+  out). Phases: `BOSS` (the fight's step logic; `Boss::sprites/palette` and `placement` stay resident),
+  `ATTRACT` (the autopilot). A phase may call resident code only. Link with `--no-check-sections` (phases
+  overlap by design); add a phase = a `ph_*` region, a `.phase.*` section, its symbols in `main.rs`.
+- **Invincibility** (user): no blinking; the TALON's 9 banks have 8-step energy-wave frames
+  (`models::shield_frames`: waves that follow the hull's silhouette outward, `light` fading to `dark` dots).
 - **Hit feedback** (user): the HUD never flashes. The border ramps black, dark grey, light grey, white, light
   red, red, light red, light grey, dark grey, black (`hud::FLASH_RAMP`, 2 frames a step); the camera shakes
   for 24 frames (`game::SHAKE_X/Y`: per axis two sines of different frequency and amplitude under a
@@ -123,13 +131,16 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   from one load image at `$4C00-$8FFF` (frame-buffer/HUD space, free until the first frame): `.hitext`
   `$E410-$FEFF` (HUD, boss flight, `sim::actors`, small game helpers), `.midtext` `$9000-$9FFF` (VIC sees
   char ROM, CPU RAM: `sim::collide/gauge`), `.lowtext` `$0200-$07FF` (`render`), `.uptext` `$5C00-$5FFF`
-  (`sim::common/world`, `hw`), `.iotext` `$D000-$DFFF`, the RAM under the I/O chips (`boss`): the game step
-  runs with `$01 = $34`, so only pure code may live there, and `asm/hud.S` banks I/O in for itself. Placement is by mangled
+  (`sim::common/world`, `hw`), `.iotext` `$D000-$DFFF`, the RAM under the I/O chips (`sim::collide/gauge`):
+  the game step runs with `$01 = $34`, so only pure code may live there, and `asm/hud.S` banks I/O in for
+  itself. `$9000-$9FFF` is the paging window. Placement is by mangled
   name in the link script (or `#[cfg_attr(target_arch = "mos", unsafe(link_section = ".hitext"))]`). Every
   region is nearly full: check `llvm-size -A dist/talonhd.elf` after changes. `World::digest` stays host-only
   (2 KB of 6502). Keep the `/DISCARD/ .init.250` rule: it calls KERNAL CHROUT at `$FFD2`, which is our code now.
 - **Boot:** the PRG erases the REU magic, then waits for magic + whole-image checksum, so `run` then `upload-reu`
   always starts on the complete new image.
-- **Next:** REU code paging (as TALON's phases): every RAM region is now nearly full. Then the KEELBREAKER,
-  runners for SKIFF, PILLBOX, HATCH, CRAWLER, the promotion sequence and the per-level REU load.
+- **Next:** the KEELBREAKER and runners for SKIFF, PILLBOX, HATCH, CRAWLER (each a paged phase), the promotion
+  sequence and the per-level REU load (it must not overwrite the phase bank `$FF0000`). Memory ideas from the
+  sibling repos still open: `opt-level "z"`, zero page `$90-$FF`, boot-only code in a retired section,
+  borrow-and-restore overlays (impact), an IRQ static-frame audit (sueme64).
 - **Hardware quirk:** `c64u.py run` right after `config` can reset the machine before the PRG loads; run again.

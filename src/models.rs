@@ -182,6 +182,10 @@ pub fn demo_frames_with_assets() -> Vec<SpriteImage> {
             frames[(demo::PLAYER_FRAME as usize) + i] = raster3d::render(&m.mesh, Orient { yaw: 0.0, pitch: 0.0, roll }, view);
         }
     }
+    let ships: Vec<SpriteImage> = frames[demo::PLAYER_FRAME as usize..(demo::PLAYER_FRAME + demo::PLAYER_BANKS) as usize].to_vec();
+    for (k, f) in shield_frames(&ships).into_iter().enumerate() {
+        frames[demo::SHIELD_FRAME as usize + k] = f;
+    }
     frames
 }
 
@@ -210,6 +214,8 @@ pub fn demo_frames() -> Vec<SpriteImage> {
         out.push(raster3d::render(&f, Orient { yaw: 0.0, pitch: 0.0, roll }, view));
     }
     out.extend(game_frames());
+    let ships: Vec<SpriteImage> = out[demo::PLAYER_FRAME as usize..(demo::PLAYER_FRAME + demo::PLAYER_BANKS) as usize].to_vec();
+    out.extend(shield_frames(&ships));
     assert_eq!(out.len(), demo::FRAMES as usize);
     out
 }
@@ -262,6 +268,78 @@ pub fn game_frames() -> Vec<SpriteImage> {
             }
         }
         out.push(img);
+    }
+    out
+}
+
+/// The invincible TALON: each bank frame centred in a larger canvas inside an energy field that follows
+/// its silhouette. Distance from the hull (in hires px: a multicolor pixel is 2 wide) drives it: a faint
+/// dotted glow against the hull, then two wave fronts half a loop apart rolling outward one pixel a
+/// step, bright (`light`) as they leave and thinning to sparse `dark` dots as they fade at the edge.
+/// Light belongs to the player (art direction): no `hot`.
+pub fn shield_frames(ships: &[SpriteImage]) -> Vec<SpriteImage> {
+    let (w, h) = (demo::SHIELD_W, demo::SHIELD_H);
+    let steps = demo::SHIELD_STEPS as f64;
+    let mut out = Vec::new();
+    for ship in ships {
+        let (ox, oy) = ((w - ship.w) / 2, (h - ship.h) / 2);
+        // Distance (hires px) from every canvas pixel to the nearest hull pixel.
+        let hull: Vec<(f64, f64)> = (0..ship.h)
+            .flat_map(|y| (0..ship.w).map(move |x| (x, y)))
+            .filter(|&(x, y)| ship.get(x, y).is_some())
+            .map(|(x, y)| (((x + ox) * 2) as f64, (y + oy) as f64))
+            .collect();
+        let dist: Vec<f64> = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .map(|(x, y)| {
+                let (px, py) = ((x * 2) as f64, y as f64);
+                hull.iter().map(|&(hx, hy)| (hx - px).powi(2) + (hy - py).powi(2)).fold(f64::MAX, f64::min).sqrt()
+            })
+            .collect();
+        // The field's reach: the canvas margin, minus a pixel.
+        let reach = (((w - ship.w) as f64).min((h - ship.h) as f64 / 2.0) - 1.0).max(4.0);
+        for step in 0..demo::SHIELD_STEPS {
+            let mut img = SpriteImage::new(w, h);
+            for y in 0..h {
+                for x in 0..w {
+                    let d = dist[(y * w + x) as usize];
+                    if d < 0.5 || d > reach {
+                        continue;
+                    }
+                    let checker = (x + y) % 2 == 0;
+                    let mut c = None;
+                    if d < 2.2 && checker {
+                        c = Some(LIGHT);
+                    }
+                    for front in 0..2 {
+                        let f = ((step as f64 / steps) + front as f64 * 0.5) % 1.0;
+                        let at = 2.0 + (reach - 2.0) * f;
+                        if (d - at).abs() < 1.1 {
+                            c = if f < 0.35 {
+                                Some(LIGHT)
+                            } else if f < 0.7 {
+                                if checker { Some(LIGHT) } else { c }
+                            } else if checker && y % 2 == 0 {
+                                Some(DARK)
+                            } else {
+                                c
+                            };
+                        }
+                    }
+                    if c.is_some() {
+                        img.set(x, y, c);
+                    }
+                }
+            }
+            for y in 0..ship.h {
+                for x in 0..ship.w {
+                    if let Some(c) = ship.get(x, y) {
+                        img.set(x + ox, y + oy, Some(c));
+                    }
+                }
+            }
+            out.push(img);
+        }
     }
     out
 }
