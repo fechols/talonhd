@@ -56,6 +56,7 @@ C64 (rust-mos + llvm-mos in WSL `Ubuntu-24.04`, paths in `scripts/env.sh`):
 ```sh
 pwsh scripts/build-windows.ps1           # -> dist/talonhd.prg, dist/talonhd.elf
 python tools/test_blit.py                # asm column kernel vs reference in a 6502 interpreter
+python tools/test_hud_irq.py             # HUD raster IRQ vs the table contract
 ```
 
 Always run `tools/test_blit.py` after touching `target-c64/asm/blit.S` (the assembler silently mis-encodes
@@ -70,8 +71,14 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   (model vs `reference.rs`), `tools/test_blit.py` (asm vs Rust kernel), `compare` (hardware vs model).
 - **Contracts** (`src/format.rs`, `src/layout.rs`): REU image `TALONHD1`; panorama = `BG_ROWS` cell rows × 320 B
   top to bottom; frames pre-shifted ×4 (or ×1, drawn at `x & !3`), column-major with segment lists. Memory map
-  as gclass: buffers `$4C00/$6000` and `$8C00/$A000`, `SEG_BUF $C000`, `JOB $CA00`, `STATUS $CA80`, code
-  `$0801-$3FFF`.
+  as gclass except: code `$0801-$4BFF`, buffers `$4C00/$6000` and `$8C00/$A000`, HUD sprite blocks `$5000`
+  (bank 1, pointers 64+) and `$8000` (bank 2, pointers 0+; never `$9000`: char ROM shadow), `SEG_BUF $C000`,
+  `JOB $CA00`, `STATUS $CA80`, `HUD_TABLE $CB00`, `COL_TABLE $E000`. REU DMAs ≤ 512 bytes (`MAX_DMA`) so the
+  HUD's raster IRQ always lands in its 3-line gap.
+- **HUD** (`src/hud.rs`, `asm/hud.S`): 8 hires sprites multiplexed into 8 rows (64 instances) by a raster IRQ that
+  reads `HUD_TABLE`; static art and few-state readouts are baked blocks chosen by pointer, only score and
+  stage digits are written per frame. Damage flash white → red → green via `$D027-$D02E`. Run
+  `tools/test_hud_irq.py` after touching `asm/hud.S`.
 - **Vertical scroll.** `Scroll { coarse, fine }`: 25 rows DMA'd from row `coarse`; 24-row mode with YSCROLL
   `7 - fine` shows bitmap lines `fine..fine+192`; sprites are drawn `fine` lines lower.
 - **3D bake** (`src/raster3d.rs`, host): mesh + `Orient` (roll, pitch, yaw) + `View` → `SpriteImage`. 4×4
@@ -83,7 +90,7 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
 - **Tech scene** (`src/demo.rs`, shared, integer-only; `src/models.rs`, host): S1 palette; the Ludo TALON
   (`assets/models/hd.ship.talon.mesh`) as the player's ship when present; procedural stand-ins (not game content)
   for the 512×512 flying fortress, the drones and the panorama.
-- **Next:** the green hardware-sprite HUD (4+4 multiplexed hires sprites, damage flash white→red→green), then the
-  Ludo GANTRY QUEEN and the S1 roster, then the TALON simulation.
+- **Next:** verify the REU checksum at boot (a stale image was once accepted), then the Ludo GANTRY QUEEN and the
+  S1 roster, then the TALON simulation.
 - **Hardware quirk:** the first `c64u.py run` after a config change or a previous run sometimes leaves the machine
   on garbage (status block full of `$55`). Run again, then `upload-reu`.

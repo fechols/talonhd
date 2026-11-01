@@ -19,6 +19,8 @@ pub struct Machine {
     /// Last values written to `$D011` and `$D021`.
     pub d011: u8,
     pub d021: u8,
+    /// Sprite colors `$D027-$D02E` as last written.
+    pub sprite_color: [u8; 8],
     pub stats: Stats,
 }
 
@@ -38,7 +40,7 @@ impl Machine {
     pub fn new(image: &[u8]) -> Self {
         let mut reu = vec![0u8; REU_SIZE as usize];
         reu[..image.len()].copy_from_slice(image);
-        Machine { ram: vec![0; 65536], color_ram: [0; 1024], reu, regs: [0; 16], dd00: 0x03, d011: 0, d021: 0, stats: Stats::default() }
+        Machine { ram: vec![0; 65536], color_ram: [0; 1024], reu, regs: [0; 16], dd00: 0x03, d011: 0, d021: 0, sprite_color: [0; 8], stats: Stats::default() }
     }
 
     fn is_io(addr: u16) -> bool {
@@ -54,6 +56,37 @@ impl Machine {
         let all = self.decode(buf, d021);
         let top = fine as usize * 160;
         all[top..top + layout::VISIBLE as usize * 160].to_vec()
+    }
+
+    /// The visible screen at full hires resolution (320×192) with the HUD's
+    /// multiplexed sprites drawn from the table and blocks in RAM, as the
+    /// raster IRQ shows them.
+    pub fn visible_with_hud(&self, buf: Buffer, d021: u8, fine: u8) -> Vec<[u8; 3]> {
+        use crate::hud;
+        let mc = self.visible(buf, d021, fine);
+        let mut out: Vec<[u8; 3]> = mc.iter().flat_map(|&p| [p, p]).collect();
+        let bank = if buf == layout::BUFFERS[0] { 0 } else { 1 };
+        let table = layout::HUD_TABLE as usize;
+        for r in 0..hud::ROWS {
+            let top = (r * hud::ROW_PITCH as usize) as i32; // screen line of the row
+            for (c, &x0) in hud::X.iter().enumerate() {
+                let ptr = self.ram[table + hud::table::PTRS as usize + r * 8 + c] as usize;
+                let ptr = if bank == 0 { ptr | layout::HUD_BANK1_POINTER as usize } else { ptr };
+                let at = layout::VIC_BANK[bank] as usize + ptr * hud::BLOCK;
+                let mut blk = [0u8; hud::BLOCK];
+                blk.copy_from_slice(&self.ram[at..at + hud::BLOCK]);
+                let color = PALETTE[self.sprite_color[c] as usize & 15];
+                for y in 0..21 {
+                    for x in 0..24 {
+                        let (sx, sy) = (x0 as i32 - 24 + x, top + y);
+                        if hud::get(&blk, x, y) && (0..320).contains(&sx) && (0..layout::VISIBLE as i32).contains(&sy) {
+                            out[sy as usize * 320 + sx as usize] = color;
+                        }
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// The bytes the VIC shows for `buf`, decoded to (code, cell) RGB pixels.
@@ -113,6 +146,7 @@ impl Hw for Machine {
             0xDD00 => self.dd00 = value,
             0xD011 => self.d011 = value,
             0xD021 => self.d021 = value & 15,
+            0xD027..=0xD02E => self.sprite_color[(addr - 0xD027) as usize] = value & 15,
             0xDF01 => self.reu_exec(value),
             0xDF00..=0xDF0F => self.regs[(addr - 0xDF00) as usize] = value,
             a if Self::is_io(a) => {}
@@ -196,5 +230,7 @@ pub fn render_demo(m: &mut Machine, img: &crate::render::Image, t: u16, buf: Buf
     render::set_palette(m, img.palette);
     render::render_frame(m, img, buf, scroll, &mut sprites[..n]);
     render::present(m, buf, scroll);
+    render::hud_init(m, img);
+    render::hud_update(m, &demo::hud_state(t));
     scroll
 }

@@ -50,8 +50,25 @@ pub const JOB: u16 = 0xCA00;
 pub const RECORD: u16 = 0xCA20;
 pub const RECORD_LEN: u16 = 0x0040;
 /// Column table for the visible columns of the current sprite (≤ 129 × 8).
-pub const COL_TABLE: u16 = 0x8000;
+/// (gclass had it at `$8000`; TALON HD keeps `$8000-$8BFF` for HUD sprites.)
+pub const COL_TABLE: u16 = 0xE000;
 pub const COL_TABLE_LEN: u16 = 0x0410;
+/// The two VIC banks.
+pub const VIC_BANK: [u16; 2] = [0x4000, 0x8000];
+/// HUD sprite blocks: 48 × 64 bytes in each bank, same contents.
+/// - Bank 2 at `$8000` (pointers 0..47). Not `$9000`: in VIC banks 0 and 2
+///   the VIC sees the character ROM at bank + `$1000-$1FFF`.
+/// - Bank 1 at `$5000` (pointers 64..111 = the bank-2 pointer | `$40`), so
+///   bank 1's `$4000-$4BFF` stays program space.
+pub const HUD_BLOCK_BASE: [u16; 2] = [0x5000, 0x8000];
+/// What bank 1's pointer adds (ORs) to the table's bank-2 pointer.
+pub const HUD_BANK1_POINTER: u8 = 0x40;
+/// Sprite pointers of each buffer (screen RAM + `$3F8`).
+pub const SPRITE_POINTERS: [u16; 2] = [0x4FF8, 0x8FF8];
+/// The multiplexer's table, read by the raster IRQ (`asm/hud.S`); see
+/// [`crate::hud::Table`] for the layout.
+pub const HUD_TABLE: u16 = 0xCB00;
+
 /// Status block the host verifier reads from a paused machine.
 pub const STATUS: u16 = 0xCA80;
 pub const COLOR_RAM: u16 = 0xD800;

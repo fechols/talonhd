@@ -53,8 +53,12 @@ pub const MAX_COLUMNS: u16 = (MAX_SPRITE_SIZE + 3 + 3) / 4;
 pub const REU_SIZE: u32 = 16 << 20;
 /// A single REU command must not cross a 512 KiB bank.
 pub const REU_BANK: u32 = 0x8_0000;
-/// Largest single DMA the runtime issues (C64U guidance).
-pub const MAX_DMA: u16 = 4096;
+/// Largest single DMA the runtime issues. The CPU (and so the raster IRQ that
+/// multiplexes the HUD sprites) is stalled for the whole transfer: 512 bytes
+/// is ~128 µs at 0.25 µs/byte, inside the HUD's 3-line row gap (~190 µs).
+pub const MAX_DMA: u16 = 512;
+/// HUD sprite blocks (64 bytes each) copied into both VIC banks at boot.
+pub const HUD_BLOCKS: u16 = 48;
 
 pub mod header {
     pub const MAGIC: usize = 0;
@@ -79,6 +83,8 @@ pub mod header {
     pub const CHECKSUM: usize = 28;
     /// u16: background panorama height in cell rows (≥ 25).
     pub const BG_ROWS: usize = 32;
+    /// u32: REU address of the HUD's static sprite blocks (`HUD_BLOCKS` × 64 bytes).
+    pub const HUD: usize = 36;
 }
 
 /// Frame directory record.

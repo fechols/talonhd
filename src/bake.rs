@@ -77,6 +77,9 @@ pub fn build_image(pano: &Panorama, frames: &[SpriteImage], border: u8) -> Resul
     // The window DMA (`hw::fetch`) splits at banks, so the panorama may span them.
     let bg_addr = a.place(&pano.bitmap_rows())?;
 
+    let hud: Vec<u8> = crate::hud::static_blocks().iter().flatten().copied().collect();
+    let hud_addr = a.place(&hud)?;
+
     let dir = a.reserve(frames.len() * format::FRAME_RECORD as usize)?;
     for (i, img) in frames.iter().enumerate() {
         assert!(img.phases == 1 || img.phases == 4, "frame {i}: phases must be 1 or 4");
@@ -126,6 +129,7 @@ pub fn build_image(pano: &Panorama, frames: &[SpriteImage], border: u8) -> Resul
     a.image[header::COLOR] = pano.palette.color;
     a.image[header::SCREEN] = pano.palette.screen;
     a.put_u16(header::BG_ROWS as u32, pano.rows);
+    a.put_u32(header::HUD as u32, hud_addr);
     let sum = checksum(&a.image);
     a.put_u32(header::CHECKSUM as u32, sum);
     Ok(a.image)

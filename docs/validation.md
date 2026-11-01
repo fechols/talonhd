@@ -45,3 +45,26 @@ Hardware (`talonhd.prg` `104fd394a15c519c…`, `talonhd.reu` `75496d0b5cee21ae�
 - The first `run` again left the machine on garbage (status block full of the `$55` fill pattern); a second
   `run` + `upload-reu` worked. Same symptom as the M0 run.
 - `dump --hold` at t=705 → `compare`: **0 mismatched bytes**; 7.4–7.6 ms per frame.
+
+## 2026-10-31 — The green helmet HUD (64 multiplexed hardware sprites) on the C64 Ultimate
+
+Package `talonhd.prg` `8f656672d89d9281…`, `talonhd.reu` `8ea313e84db57c07…`.
+
+- 8 hires sprites (4 left, 4 right, unexpanded), 8 rows of 21 lines + 3-line gaps = 64 sprite instances per
+  frame. The raster IRQ `hud_irq` (`asm/hud.S`) sets each row's Y and pointers in the gap; REU DMAs are capped
+  at 512 bytes (`MAX_DMA`) so no transfer delays the IRQ past its gap.
+- `tools/test_hud_irq.py`: `hud_irq` matches the table contract over 160 IRQs (Y, both banks' pointers, row
+  counter, next line, registers preserved, no stray writes). `tools/test_blit.py` still passes.
+- Code size: drawing the HUD per pixel (32-bit masks, division) cost ~11 KB of 6502 code and overflowed
+  `$0801-$3FFF`. Readouts with few states (lives, gauge, speed) are now pre-drawn variants picked by pointer.
+  Score and stage digits are byte-aligned glyph copies, and digits come from subtraction, not division.
+  Program region `$0801-$4BFF` (end `$4554`).
+- **Found on hardware:** HUD blocks at `$9000` showed character-ROM glyphs on every other frame (the VIC sees
+  the char ROM at `$1000-$1FFF` of banks 0 and 2), which read as flicker and "doubled" sprites. Bank 2's
+  blocks now sit at `$8000` (pointers 0–47), bank 1's at `$5000` (pointers 64–111); the IRQ ORs `$40` into
+  bank 1's pointers. After the fix, 12 consecutive captures were clean.
+- **Found on hardware:** the PRG accepted a stale REU image (the previous upload's magic) before the new
+  upload arrived, and copied header bytes as HUD art. A second `run` after the upload worked. The boot check
+  should verify the image checksum, not just the magic (todo).
+- Render 7.8–11.6 ms per frame with the HUD; `dump --hold` at t=1316 → `compare`: **0 mismatched bytes**
+  (bitmap, screen, color RAM; sprites are not part of the dump).

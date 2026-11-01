@@ -18,6 +18,8 @@ use talonhd::render::{self, Image, Scroll, Sprite};
 
 unsafe extern "C" {
     fn reu_execute(command: u8);
+    fn hud_irq();
+    fn hud_irq_enable();
     #[cfg(not(feature = "rust-columns"))]
     fn draw_column_asm();
 }
@@ -133,6 +135,19 @@ pub extern "C" fn main() -> i16 {
     c.poke(0xD016, layout::D016);
     c.poke(0xD020, img.border);
     render::set_palette(c, img.palette);
+
+    // HUD: sprite blocks into both banks, sprites set up, the multiplexer
+    // table filled, then the raster IRQ chain started at the top border.
+    render::hud_init(c, &img);
+    render::hud_update(c, &demo::hud_state(0));
+    c.poke(layout::HUD_TABLE, 0);
+    let vector = hud_irq as usize as u16;
+    c.poke(0xFFFE, vector as u8);
+    c.poke(0xFFFF, (vector >> 8) as u8);
+    c.poke(0xD012, talonhd::hud::TOP_IRQ_LINE);
+    c.poke(0xD019, 0xFF);
+    c.poke(0xD01A, 0x01);
+    unsafe { hud_irq_enable() };
     for i in 0..16 {
         c.poke(layout::STATUS + i, 0);
     }
@@ -184,6 +199,7 @@ pub extern "C" fn main() -> i16 {
         // present() also turns the display on: $D011 = bitmap, 24 rows, YSCROLL.
         render::present(c, buf, scroll);
         flipped_at = micros(c);
+        render::hud_update(c, &demo::hud_state(t));
         c.poke(layout::STATUS + status::FRONT, back as u8);
         status_poke16(c, status::SHOWN_T, t);
         c.poke(layout::STATUS + status::FLIPPING, 0);

@@ -121,7 +121,7 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         let n = demo::scene(t, &mut sc);
         let want = reference::compose(&pano, &frames, scroll, &sc[..n]);
         check(&m, buf, &want).map_err(|e| format!("t={t}: {e}"))?;
-        png::save_wide(&previews.join(format!("frames/t{t:04}.png")), 160, &m.visible(buf, img.palette.d021, scroll.fine))?;
+        png::save(&previews.join(format!("frames/t{t:04}.png")), 320, layout::VISIBLE as u32, &m.visible_with_hud(buf, img.palette.d021, scroll.fine))?;
     }
     println!("model matches reference compositor; stats {:?}", m.stats);
     println!("wrote {} and previews in {}", out.display(), previews.display());
@@ -154,7 +154,7 @@ fn cmd_preview(args: &Args) -> Result<(), String> {
     let t = args.num("--t", 0)?;
     let out = args.path("--out", "output/preview.png");
     let scroll = model::render_demo(&mut m, &img, t, BUFFERS[0]);
-    png::save_wide(&out, 160, &m.visible(BUFFERS[0], img.palette.d021, scroll.fine))?;
+    png::save(&out, 320, layout::VISIBLE as u32, &m.visible_with_hud(BUFFERS[0], img.palette.d021, scroll.fine))?;
     println!("t={t}: {:?}", m.stats);
     Ok(())
 }

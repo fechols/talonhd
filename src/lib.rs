@@ -12,6 +12,7 @@
 
 pub mod demo;
 pub mod format;
+pub mod hud;
 pub mod hw;
 pub mod layout;
 pub mod render;

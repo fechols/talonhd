@@ -5,6 +5,7 @@
 //! A pure function of demo time `t` with integer math only, so the host can
 //! render exactly the frame the C64 reports showing.
 
+use crate::hud;
 use crate::render::Sprite;
 
 /// Frame directory layout (see `models::demo_frames`).
@@ -50,6 +51,24 @@ fn bank(v: i16, banks: u16) -> u16 {
 /// Panorama line at the top of the screen: the view climbs one line a frame.
 pub fn scroll(t: u16) -> u16 {
     (PANO_PERIOD - (t % PANO_PERIOD)) % PANO_PERIOD
+}
+
+/// What the HUD shows at demo time `t`: a running score, the gauge stepping,
+/// the bank of the player's ship, tapes rolling with the scroll and a
+/// damage flash every 400 frames.
+pub fn hud_state(t: u16) -> hud::State {
+    let p = t.wrapping_mul(3) as u8;
+    hud::State {
+        score: t as u32 * 30,
+        lives: 3 - ((t / 700) % 3) as u8,
+        gauge: ((t / 40) % 9) as u8,
+        speed: ((t / 90) % 6) as u8,
+        stage: 1,
+        bank: bank(icos(p), PLAYER_BANKS) as i8 - 4,
+        tape_l: t,
+        tape_r: t / 2,
+        since_hit: (t % 400).min(255) as u8,
+    }
 }
 
 /// Fill `out` with the sprites of demo time `t`; returns how many.

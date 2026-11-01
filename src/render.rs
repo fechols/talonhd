@@ -17,6 +17,7 @@
 
 use crate::format::{self, column, frame, header, le16, le24, phase};
 use crate::hw::{self, Hw};
+use crate::hud;
 use crate::layout::{self, Buffer, job};
 
 /// One sprite instance in a scene. `y` is a screen line: 0 is the first
@@ -66,6 +67,8 @@ pub struct Image {
     pub border: u8,
     pub frames: u16,
     pub directory: u32,
+    /// REU address of the HUD's static sprite blocks.
+    pub hud: u32,
 }
 
 fn record<H: Hw + ?Sized, const N: usize>(hw: &mut H, addr: u32) -> [u8; N] {
@@ -99,6 +102,7 @@ pub fn read_image<H: Hw + ?Sized>(hw: &mut H) -> Option<Image> {
         border: h[header::BORDER],
         frames: le16(&h, header::FRAMES),
         directory: le24(&h, header::DIRECTORY),
+        hud: le24(&h, header::HUD),
     })
 }
 
@@ -111,6 +115,58 @@ pub fn set_palette<H: Hw + ?Sized>(hw: &mut H, pal: Palette) {
         hw.fill(b.screen, layout::CELLS, pal.screen);
     }
     hw.fill(layout::COLOR_RAM, layout::CELLS, pal.color);
+}
+
+/// Copy the HUD's static sprite blocks into both VIC banks and set up the 8
+/// sprites (hires, unexpanded, in front, X positions). Call once at boot.
+#[inline(never)]
+pub fn hud_init<H: Hw + ?Sized>(hw: &mut H, img: &Image) {
+    for base in layout::HUD_BLOCK_BASE {
+        hw::fetch(hw, img.hud, base, format::HUD_BLOCKS * hud::BLOCK as u16);
+    }
+    let mut msb = 0u8;
+    for (i, &x) in hud::X.iter().enumerate() {
+        hw.poke(0xD000 + 2 * i as u16, x as u8);
+        if x > 255 {
+            msb |= 1 << i;
+        }
+    }
+    hw.poke(0xD010, msb);
+    hw.poke(0xD017, 0);
+    hw.poke(0xD01B, 0);
+    hw.poke(0xD01C, 0);
+    hw.poke(0xD01D, 0);
+    hw.poke(0xD015, 0xFF);
+}
+
+/// Per-frame HUD update (call in vertical blank): the multiplexer table
+/// (not its row counter, which the IRQ owns), the 8 colors and the dynamic
+/// blocks in both banks.
+#[inline(never)]
+pub fn hud_update<H: Hw + ?Sized>(hw: &mut H, s: &hud::State) {
+    let t = hud::build(s);
+    let base = layout::HUD_TABLE;
+    for r in 0..hud::ROWS {
+        hw.poke(base + hud::table::LINES + r as u16, t.lines[r]);
+        hw.poke(base + hud::table::YS + r as u16, t.ys[r]);
+        for c in 0..8 {
+            hw.poke(base + hud::table::PTRS + (r * 8 + c) as u16, t.ptrs[r][c]);
+        }
+    }
+    for (i, &c) in hud::colors(s).iter().enumerate() {
+        hw.poke(0xD027 + i as u16, c);
+    }
+    let mut blocks = [[0u8; hud::BLOCK]; hud::block::DYNAMIC_COUNT];
+    hud::dynamic_blocks(s, &mut blocks);
+    for bank in layout::HUD_BLOCK_BASE {
+        let mut a = bank + hud::block::DYNAMIC as u16 * hud::BLOCK as u16;
+        for b in &blocks {
+            for (k, &v) in b.iter().enumerate().take(63) {
+                hw.poke(a + k as u16, v);
+            }
+            a += hud::BLOCK as u16;
+        }
+    }
 }
 
 /// Stable insertion sort by z (few sprites; no allocation).
