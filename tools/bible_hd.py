@@ -114,6 +114,11 @@ class Checker:
                 self.err(data, f"{label}: unknown ship {r.get('ship')}")
             elif ship.get("stage") != r.get("stage"):
                 self.err(data, f"{label}: ship {ship['id']} belongs to {ship.get('stage')}")
+            light = r.get("light", {})
+            d = light.get("dir", [])
+            if (len(d) != 3 or d[2] <= 0 or not 0.0 <= light.get("ambient", -1) <= 0.5
+                    or not 0.5 <= light.get("intensity", 0) <= 1.3 or not light.get("time")):
+                self.err(data, f"{label}: light needs time, dir (sun above the horizon, z > 0), ambient 0-0.5, intensity 0.5-1.3")
             for key in ("clear_line", "quill_reply"):
                 text = r.get(key, "")
                 if not text or text != text.upper():

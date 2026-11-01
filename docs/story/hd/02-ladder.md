@@ -3,14 +3,17 @@ id = "hd.ladder"
 kind = "hd_ladder"
 name = "PROMOTION LADDER"
 status = "approved"
-revision = 1
+revision = 2
 
 # One rung per stage: the palette the stage shows, QUILL's rank while flying it, and the airframe.
 # palette = [void, dark, light, hot] as C64 color indices (00-bible.md [palette]).
 # The ship's two hull colors are always this stage's dark and light.
+# light = the stage's time of day (raster3d::Light): dir toward the sun (x right, y up the screen, z toward
+# the viewer), ambient fill, sun intensity. One light per stage lights its sprites AND its 3D level geometry.
 
 [[rungs]]
 stage = "stage.s1"
+light = { time = "morning", dir = [-0.45, 0.55, 0.70], ambient = 0.18, intensity = 1.00, note = "the morning sun the whole S1 roster was approved under: upper left, shadows short to the lower right" }
 palette = [6, 12, 1, 3]
 palette_names = ["blue sea", "mid grey concrete", "white surf and hull", "cyan crystal"]
 rank = "CAPTAIN"
@@ -20,6 +23,7 @@ quill_reply = "IT'S A TEST PROGRAMME, MARSHAL. I'M TESTING."
 
 [[rungs]]
 stage = "stage.s2"
+light = { time = "afternoon", dir = [0.55, 0.35, 0.65], ambient = 0.20, intensity = 1.00, note = "warm afternoon from the upper right: the terraces step into their own shade" }
 palette = [9, 8, 15, 14]
 palette_names = ["brown soil", "terracotta", "cream stone", "light blue crystal"]
 rank = "MAJOR"
@@ -29,6 +33,7 @@ quill_reply = "I'LL PACK SUNSCREEN."
 
 [[rungs]]
 stage = "stage.s3"
+light = { time = "hard sun", dir = [-0.70, 0.30, 0.45], ambient = 0.08, intensity = 1.10, note = "a hard low sun on the canyon: long black shadows, almost no fill" }
 palette = [2, 8, 7, 3]
 palette_names = ["red rock", "orange sand", "yellow sun", "cyan ore"]
 rank = "LT COLONEL"
@@ -38,6 +43,7 @@ quill_reply = "THAT'S WHAT I LIKE ABOUT THEM."
 
 [[rungs]]
 stage = "stage.s4"
+light = { time = "overcast", dir = [-0.20, 0.50, 0.84], ambient = 0.35, intensity = 0.70, note = "overcast over the canals: soft light, short pale shadows" }
 palette = [11, 12, 7, 3]
 palette_names = ["dark grey steel", "mid grey concrete", "safety yellow", "cyan pipe glow"]
 rank = "COLONEL"
@@ -47,6 +53,7 @@ quill_reply = "I ALWAYS MAKE THEM COUNT. I JUST DON'T RETURN THEM."
 
 [[rungs]]
 stage = "stage.s5"
+light = { time = "late day", dir = [-0.80, 0.15, 0.45], ambient = 0.15, intensity = 0.95, note = "the late-day siege: a low sun from the left throws the walls' shadows across the courts" }
 palette = [11, 5, 15, 3]
 palette_names = ["dark grey shadow", "olive glacis", "light stone", "cyan conduits"]
 rank = "BRIGADIER"
@@ -56,6 +63,7 @@ quill_reply = "THEN IT CAN LISTEN TO ME."
 
 [[rungs]]
 stage = "stage.s6"
+light = { time = "humid", dir = [0.30, 0.60, 0.74], ambient = 0.30, intensity = 0.80, note = "humid jungle light, diffuse through the haze" }
 palette = [6, 5, 13, 3]
 palette_names = ["deep blue shade", "green canopy", "light green leaves", "cyan crystal flowers"]
 rank = "MAJ GENERAL"
@@ -65,6 +73,7 @@ quill_reply = "GOOD. I'M IN A HURRY."
 
 [[rungs]]
 stage = "stage.s7"
+light = { time = "dusk", dir = [0.75, -0.20, 0.40], ambient = 0.22, intensity = 0.80, note = "dusk above the clouds: the last sun low from the right, from below the horizon line of the screen" }
 palette = [0, 4, 15, 7]
 palette_names = ["night", "purple dusk", "light grey cloud", "yellow lightning"]
 rank = "LT GENERAL"
@@ -74,6 +83,7 @@ quill_reply = "YES, MARSHAL. ALL THE WAY UP AND BACK."
 
 [[rungs]]
 stage = "stage.s8"
+light = { time = "orbit", dir = [-0.50, 0.65, 0.57], ambient = 0.05, intensity = 1.15, note = "unfiltered sunlight in orbit: hard edges, black shade" }
 palette = [0, 6, 1, 3]
 palette_names = ["space", "cobalt", "white-hot", "cyan crystal"]
 rank = "GENERAL"
@@ -143,3 +153,4 @@ the Lattice is yellow: inside the storm, the crystal glows like the lightning.
 - Date: 2026-10-31
 - Approver: fechols (the user)
 - Decision: approved (whole HD layer approved at once, "Approve all, start Ludo")
+- rev 2 (2026-11-01): a `light` (time of day) per stage, lighting both its sprites and its 3D level geometry (user: "each level could have a different time of day"). S1's is the light every approved model already used (no visual change); S2-S8 are drafts pending approval.

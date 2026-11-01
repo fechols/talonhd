@@ -124,6 +124,11 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   the window. After every C64 build run `tools/check_phases.py`; add a phase = a `ph_*` region, a
   `.phase.*` section, its symbols in `main.rs`, its entry in `check_phases.py` `ENTRIES`. 6502 math: avoid
   i32 multiplies in per-frame code (turret aiming cost 3 ms each until it went 16-bit, in the step).
+- **Light / time of day** (`raster3d::Light`, `02-ladder.md` rung `light`): one light per stage for its sprites
+  AND its level. Shading is normalised to the S1 morning sun (`MORNING`, the light every approved model used),
+  so a lower sun darkens flat ground. S2-S8 lights are drafts pending approval. Animated levels (user idea):
+  N full panorama copies, frame `t mod N` picked by the background DMA (no extra per-frame cost; S1 is
+  216 KB per copy).
 - **Midboss** (`src/midboss.rs`, paged): the KEELBREAKER leaves its berth at line 2400 and slides up the docks
   channel; the scroll eases to 0.125 px/tick while it fights and it creeps up the screen (a line every 8
   ticks) so its later turrets come into reach. Turrets 12 HP each (BROADSIDE, WAKE MINES), then the bridge
@@ -142,8 +147,11 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   GANNET pitches, shots, bursts, SPARKs) plus the boss's flight (`PART_XY0` + compile-time `PART_DX`; no trig
   on the C64). Her six parts have one frame per body bank sample (`hand::queen_part_frames`, rendered at bake
   time, no `.mesh` files): same roll as the body, posed by the bank (barrels lean in, legs trail), so nothing
-  jumps; `queen_parts_fit_and_move_smoothly` guards it. `src/s1.rs` paints the S1 BREAKWATER panorama (26 screens; ground void/dark only, flat concrete
-  50 % checker, open ground 25 %, `light` for surf and paint, `hot` for crystal; `output/sheets/panorama.png`).
+  jumps; `queen_parts_fit_and_move_smoothly` guards it. `src/s1.rs` builds S1 BREAKWATER as 3D geometry (sea swells, islets with surf, the sea wall,
+  quays/basins/piers, containers, tanks, cranes, runways and decals, hangars, bushes, crystal cracks) and
+  renders it in strips with `raster3d::render_scene` under the stage light with cast shadows
+  (`ShadowMap`, normal-offset lookups); ground materials void/dark only, `light` for surf and paint, `hot`
+  for crystal (`output/sheets/panorama.png`).
 - **C64 code space** (`target-c64/link.ld`, `opt-level = "s"`): `$0801-$4BFF` plus five regions copied at boot
   from one load image at `$4C00-$8FFF` (frame-buffer/HUD space, free until the first frame): `.hitext`
   `$E410-$FEFF` (HUD, boss flight, `sim::actors`, small game helpers), `.midtext` `$9000-$9FFF` (VIC sees
@@ -157,9 +165,8 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
 - **Boot:** the PRG erases the REU magic, then waits for magic + whole-image checksum, so `run` then `upload-reu`
   always starts on the complete new image.
 - **Next:** runners for SKIFF, PILLBOX, HATCH, CRAWLER (each a paged phase), the promotion sequence and the
-  per-level REU load (it must not overwrite the phase bank `$FF0000`). User idea (2026-11-01): levels as
-  offline-rendered 3D geometry too, lit with the same per-level light as the sprites (a time of day per
-  stage). Memory ideas from the
+  per-level REU load (it must not overwrite the phase bank `$FF0000`). Then animated level frames (rolling
+  swells, searchlights, pulsing crystal). Memory ideas from the
   sibling repos still open: `opt-level "z"`, zero page `$90-$FF`, boot-only code in a retired section,
   borrow-and-restore overlays (impact), an IRQ static-frame audit (sueme64).
 - **Hardware quirk:** `c64u.py run` right after `config` can reset the machine before the PRG loads; run again.

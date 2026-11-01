@@ -301,3 +301,17 @@ C64U: held frame tick 3556 (render 3.1 ms): **0 mismatched bytes**.
   turret on the 6502 (render 15-18 ms). Now aimed in the step with 16-bit math, headings kept in the state:
   render 7-10 ms during the fight.
 - C64U: held frames tick 5322 and 6033 (fight): **0 mismatched bytes**.
+
+## 2026-11-01 — S1 as 3D level geometry under the stage light, with cast shadows
+
+User: levels as offline-rendered 3D geometry lit like the sprites, a time of day per stage.
+- `raster3d::Light` (direction, ambient, intensity) replaces the constant; `MORNING` reproduces the old shading
+  exactly (raster3d golden hashes unchanged). `render_scene` + `ShadowMap` (depth along the light, normal-offset
+  lookups: the first version shadowed a hangar's own curved roof).
+- Bible: ladder rev 2 adds a `light` per rung (S1 morning = the approved light; S2-S8 drafts), checked by
+  `bible_hd.py`; art direction §9 updated.
+- `src/s1.rs` rebuilt as geometry. Art-direction passes: a dense swell checker -> sparse streaks (water
+  albedo 0.25, varied crests); big ground triangles -> near-flat ground speckled by bush and mound shadows;
+  hangar roofs that matched the ground -> solid dark sunny side.
+- Panorama: void 70 %, dark 29 %, light 0.8 %, hot 0.5 %. Bake self-check passes.
+- C64U: held frame tick 3726 (over the docks, render 6.4 ms): **0 mismatched bytes**.

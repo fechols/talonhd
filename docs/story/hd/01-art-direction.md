@@ -3,7 +3,7 @@ id = "hd.art"
 kind = "hd_art"
 name = "ART DIRECTION"
 status = "approved"
-revision = 2
+revision = 3
 
 # Ludo 3D: `ludo model create-image` (the render to convert) then `ludo model create` (GLB).
 # The image is converted as-is, so it must show the whole object, flat paint per part, nothing else.
@@ -134,8 +134,10 @@ smooth gradient. It is anchored in sprite space, so it travels with the object a
 ## 9 The background stays down
 
 Panoramas are `void` and `dark`, with `light` for small markings (surf, runway paint) and `hot` only where
-the Lattice has grown into the ground. Ground structures are rendered from the same models and light as
-the sprites, one luminance step down. The play layer owns the contrast.
+the Lattice has grown into the ground. The whole level is 3D geometry built by the art director (sea swells,
+quays, hangars, terrain, decals for paint and crystal), rendered offline under the stage's own light
+(`02-ladder.md` `light`, the same light as its sprites) with cast shadows, one luminance step down. The
+play layer owns the contrast; the time of day shows in where light falls and how long the shadows run.
 
 ## 10 Review
 
@@ -153,3 +155,4 @@ Nothing is accepted from Ludo until the lineup sheet has been looked at by a hum
 - Approver: fechols (the user)
 - Decision: approved (whole HD layer approved at once, "Approve all, start Ludo")
 - rev 2 (2026-10-31): "weapons are hot" added to section 4 (from the GANTRY QUEEN review)
+- 2026-11-01: §9: levels are 3D geometry rendered under the stage light with cast shadows (user request).

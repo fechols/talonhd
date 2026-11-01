@@ -3,7 +3,9 @@
 //! frame in the four global multicolor codes.
 //!
 //! The look (TALON HD art direction):
-//! - **One key light** for the whole game, upper-left and toward the viewer.
+//! - **One key light per stage** ([`Light`]: its time of day), shared by the stage's sprites and its
+//!   level geometry; S1's morning sun is upper-left and toward the viewer.
+//! - **Cast shadows** on level geometry ([`render_scene`], a shadow map along the light).
 //! - **Faceted:** one intensity per face (Lambert on the face normal).
 //! - **Ramps:** each material shades through an ordered list of codes, dark →
 //!   light. Intensity is quantized in half steps: a whole step is a solid
@@ -206,9 +208,22 @@ impl From<(f64, f64, f64)> for Orient {
     }
 }
 
-/// The game's one key light: upper-left, toward the viewer.
+/// The S1 key light (morning): upper-left, toward the viewer.
 pub const LIGHT: V3 = [-0.45, 0.55, 0.70];
 const AMBIENT: f64 = 0.18;
+
+/// A stage's key light: its time of day. `dir` points toward the sun (x right, y up the screen, z toward
+/// the viewer). Shading is normalised to the morning sun's height, so a flat top is 1.0 at S1's light and
+/// darker under a lower sun; `intensity` scales the sun, `ambient` is the floor every face keeps.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Light {
+    pub dir: V3,
+    pub ambient: f64,
+    pub intensity: f64,
+}
+
+/// S1 BREAKWATER, morning (and the light every sprite was approved under).
+pub const MORNING: Light = Light { dir: LIGHT, ambient: AMBIENT, intensity: 1.0 };
 
 fn sub(a: V3, b: V3) -> V3 {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
@@ -224,8 +239,14 @@ fn normalize(a: V3) -> V3 {
     [a[0] / l, a[1] / l, a[2] / l]
 }
 
-/// Shade of one face: (code a, code b); a == b is solid, else a checkerboard.
+/// Shade of one face under the morning light.
 fn shade(m: &Material, normal: V3) -> (u8, u8) {
+    shade_lit(m, normal, &MORNING, false)
+}
+
+/// Shade of one face: (code a, code b); a == b is solid, else a checkerboard. `shadowed`: the sun is
+/// blocked, only the ambient term remains.
+fn shade_lit(m: &Material, normal: V3, light: &Light, shadowed: bool) -> (u8, u8) {
     let n = m.ramp.len();
     if m.emissive || n == 1 {
         let c = *m.ramp.last().unwrap();
@@ -234,9 +255,10 @@ fn shade(m: &Material, normal: V3) -> (u8, u8) {
     // Normalized so a face pointing straight up (at the viewer) gets 1.0; faces tilted toward the key
     // light get up to 1/l.z (~1.42): with an albedo below 1, flat tops sit mid-ramp and light-facing
     // facets catch a highlight.
-    let l = normalize(LIGHT);
-    let lambert = (dot(normal, l) / l[2]).clamp(0.0, 1.0 / l[2]);
-    let lit = (AMBIENT + (1.0 - AMBIENT) * lambert) * m.albedo;
+    let l = normalize(light.dir);
+    let reference = normalize(LIGHT)[2];
+    let lambert = if shadowed { 0.0 } else { (dot(normal, l) / reference).clamp(0.0, 1.0 / reference) * light.intensity };
+    let lit = (light.ambient + (1.0 - light.ambient) * lambert) * m.albedo;
     // Position along the ramp; the checker covers only the middle 40 % of each step, so most faces
     // are solid and a checker always means a real mid-tone.
     let t = lit.clamp(0.0, 1.0) * (n - 1) as f64;
@@ -353,6 +375,178 @@ pub fn render(mesh: &Mesh, o: Orient, view: View) -> SpriteImage {
             }
             let best = counts.iter().max_by_key(|c| (c.1, std::cmp::Reverse(c.0))).unwrap().0;
             let (ca, cb) = shades[best as usize];
+            img.set(x as u16, y as u16, Some(if (x + y) & 1 == 0 { ca } else { cb }));
+        }
+    }
+    img
+}
+
+/// A shadow map over a whole scene: the mesh rasterized along the light into a grid of the depth nearest
+/// the sun (one cell per hires px of the plane across the light).
+pub struct ShadowMap {
+    e1: V3,
+    e2: V3,
+    l: V3,
+    u0: f64,
+    v0: f64,
+    w: usize,
+    h: usize,
+    depth: Vec<f64>,
+}
+
+impl ShadowMap {
+    pub fn new(mesh: &Mesh, light: &Light) -> ShadowMap {
+        let l = normalize(light.dir);
+        // A basis across the light.
+        let up = if l[2].abs() < 0.9 { [0.0, 0.0, 1.0] } else { [0.0, 1.0, 0.0] };
+        let e1 = normalize(cross(up, l));
+        let e2 = cross(l, e1);
+        let proj = |p: V3| (dot(p, e1), dot(p, e2), dot(p, l));
+        let pts: Vec<(f64, f64, f64)> = mesh.verts.iter().map(|&v| proj(v)).collect();
+        let (mut u0, mut v0, mut u1, mut v1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        for &(u, v, _) in &pts {
+            u0 = u0.min(u);
+            v0 = v0.min(v);
+            u1 = u1.max(u);
+            v1 = v1.max(v);
+        }
+        let (u0, v0) = (u0.floor() - 1.0, v0.floor() - 1.0);
+        let (w, h) = ((u1 - u0).ceil() as usize + 2, (v1 - v0).ceil() as usize + 2);
+        let mut depth = vec![f64::NEG_INFINITY; w * h];
+        for t in &mesh.tris {
+            let (a, b, c) = (pts[t[0] as usize], pts[t[1] as usize], pts[t[2] as usize]);
+            let area = (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0);
+            if area.abs() < 1e-9 {
+                continue;
+            }
+            let x0 = (a.0.min(b.0).min(c.0) - u0).floor().max(0.0) as usize;
+            let x1 = ((a.0.max(b.0).max(c.0) - u0).ceil() as usize).min(w);
+            let y0 = (a.1.min(b.1).min(c.1) - v0).floor().max(0.0) as usize;
+            let y1 = ((a.1.max(b.1).max(c.1) - v0).ceil() as usize).min(h);
+            for y in y0..y1 {
+                let py = y as f64 + 0.5 + v0;
+                for x in x0..x1 {
+                    let px = x as f64 + 0.5 + u0;
+                    let w0 = ((b.0 - px) * (c.1 - py) - (b.1 - py) * (c.0 - px)) / area;
+                    let w1 = ((c.0 - px) * (a.1 - py) - (c.1 - py) * (a.0 - px)) / area;
+                    let w2 = 1.0 - w0 - w1;
+                    if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 {
+                        continue;
+                    }
+                    let d = w0 * a.2 + w1 * b.2 + w2 * c.2;
+                    let i = y * w + x;
+                    if d > depth[i] {
+                        depth[i] = d;
+                    }
+                }
+            }
+        }
+        ShadowMap { e1, e2, l, u0, v0, w, h, depth }
+    }
+
+    /// True when something lies between `p` (on a surface with normal `n`) and the sun. The lookup point
+    /// is pushed off the surface along its normal, plus a small bias, so steep faces (a hangar's curved
+    /// roof) don't shadow themselves while low objects (bushes) still cast.
+    pub fn shadowed_at(&self, p: V3, n: V3) -> bool {
+        self.shadowed([p[0] + n[0] * 2.0, p[1] + n[1] * 2.0, p[2] + n[2] * 2.0])
+    }
+
+    /// True when something lies between `p` and the sun (with a small bias against self-shadowing).
+    pub fn shadowed(&self, p: V3) -> bool {
+        let (u, v, d) = (dot(p, self.e1) - self.u0, dot(p, self.e2) - self.v0, dot(p, self.l));
+        if u < 0.0 || v < 0.0 {
+            return false;
+        }
+        let (x, y) = (u as usize, v as usize);
+        if x >= self.w || y >= self.h {
+            return false;
+        }
+        d < self.depth[y * self.w + x] - 1.0
+    }
+}
+
+/// Render level geometry (no orientation: model space is the world) under `light`, with shadows from
+/// `shadows` (built once for the whole scene). Pixels no triangle covers come out transparent.
+pub fn render_scene(mesh: &Mesh, view: View, light: &Light, shadows: &ShadowMap) -> SpriteImage {
+    let (w, h) = (view.w as usize, view.h as usize);
+    let (sw, sh) = (w * SS, h * SS);
+    let mut depth = vec![f64::NEG_INFINITY; sw * sh];
+    let mut face = vec![u32::MAX; sw * sh];
+    let pts: Vec<V3> = mesh.verts.iter().map(|&v| [(view.cx + v[0]) * 2.0, (view.cy - v[1]) * 4.0, v[2]]).collect();
+    let mut normals = Vec::with_capacity(mesh.tris.len());
+    for (ti, t) in mesh.tris.iter().enumerate() {
+        let (va, vb, vc) = (mesh.verts[t[0] as usize], mesh.verts[t[1] as usize], mesh.verts[t[2] as usize]);
+        let n = cross(sub(vb, va), sub(vc, va));
+        let len = dot(n, n).sqrt();
+        normals.push(if len > 1e-9 {
+            let n = [n[0] / len, n[1] / len, n[2] / len];
+            if n[2] < 0.0 { [-n[0], -n[1], -n[2]] } else { n }
+        } else {
+            [0.0, 0.0, 1.0]
+        });
+        let (a, b, c) = (pts[t[0] as usize], pts[t[1] as usize], pts[t[2] as usize]);
+        if a[1].max(b[1]).max(c[1]) < 0.0 || a[1].min(b[1]).min(c[1]) > sh as f64 {
+            continue;
+        }
+        let area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+        if area.abs() < 1e-9 {
+            continue;
+        }
+        let x0 = (a[0].min(b[0]).min(c[0]).floor().max(0.0)) as usize;
+        let x1 = (a[0].max(b[0]).max(c[0]).ceil().min(sw as f64)) as usize;
+        let y0 = (a[1].min(b[1]).min(c[1]).floor().max(0.0)) as usize;
+        let y1 = (a[1].max(b[1]).max(c[1]).ceil().min(sh as f64)) as usize;
+        for sy in y0..y1 {
+            let py = sy as f64 + 0.5;
+            for sx in x0..x1 {
+                let px = sx as f64 + 0.5;
+                let w0 = ((b[0] - px) * (c[1] - py) - (b[1] - py) * (c[0] - px)) / area;
+                let w1 = ((c[0] - px) * (a[1] - py) - (c[1] - py) * (a[0] - px)) / area;
+                let w2 = 1.0 - w0 - w1;
+                if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 {
+                    continue;
+                }
+                let z = w0 * a[2] + w1 * b[2] + w2 * c[2];
+                let i = sy * sw + sx;
+                if z > depth[i] {
+                    depth[i] = z;
+                    face[i] = ti as u32;
+                }
+            }
+        }
+    }
+    let mut img = SpriteImage::new(view.w, view.h);
+    let mut counts: Vec<(u32, u8)> = Vec::with_capacity(SS * SS);
+    for y in 0..h {
+        for x in 0..w {
+            counts.clear();
+            let mut covered = 0;
+            for j in 0..SS {
+                for i in 0..SS {
+                    let f = face[(y * SS + j) * sw + x * SS + i];
+                    if f == u32::MAX {
+                        continue;
+                    }
+                    covered += 1;
+                    match counts.iter_mut().find(|c| c.0 == f) {
+                        Some(c) => c.1 += 1,
+                        None => counts.push((f, 1)),
+                    }
+                }
+            }
+            if covered * 2 < SS * SS {
+                continue;
+            }
+            let best = counts.iter().max_by_key(|c| (c.1, std::cmp::Reverse(c.0))).unwrap().0;
+            // The pixel centre in world space: depth from the centre sample of the winning face.
+            let centre = (y * SS + SS / 2) * sw + x * SS + SS / 2;
+            let z = if face[centre] == best { depth[centre] } else {
+                (0..SS * SS).map(|k| (y * SS + k / SS) * sw + x * SS + k % SS).find(|&i| face[i] == best).map(|i| depth[i]).unwrap()
+            };
+            let p = [(x * 2) as f64 + 1.0 - view.cx, view.cy - y as f64 - 0.5, z];
+            let m = &mesh.materials[mesh.mats[best as usize] as usize];
+            let n = normals[best as usize];
+            let (ca, cb) = shade_lit(m, n, light, shadows.shadowed_at(p, n));
             img.set(x as u16, y as u16, Some(if (x + y) & 1 == 0 { ca } else { cb }));
         }
     }
