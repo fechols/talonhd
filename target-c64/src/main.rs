@@ -203,12 +203,21 @@ pub extern "C" fn main() -> i16 {
     // 64 MHz with badlines off (C64U turbo registers); harmless elsewhere.
     c.poke(0xD031, 0x8F);
     c.poke(0xD011, 0x0B); // blank while setting up
-    // Wait (flashing the border) until a TALON HD image is in the REU, so it
-    // can be uploaded after starting the PRG, past any REU preload on reset.
-    // Erase any earlier image's magic, then wait for a complete new one
-    // (magic present and the whole-image checksum right).
-    render::invalidate_image(c);
-    let img: Image = loop {
+    // An image already in the REU (loaded before the PRG, e.g. from the C64U's menu) is used when it is
+    // complete and was baked with this PRG's phases (same stamp). Otherwise erase whatever is there
+    // and wait (flashing the border) for a complete new upload (magic present and the whole-image
+    // checksum right): `tools/c64u.py run` clears the magic first, so `run` + `upload-reu` never starts
+    // on the previous image.
+    // SAFETY: a plain read of a static the build patches; volatile so it is not folded to 0xFFFF.
+    let stamp = unsafe { core::ptr::read_volatile(&raw const PHASE_STAMP) };
+    let preloaded = match render::read_image(c) {
+        Some(img) if img.phase_stamp == stamp && render::verify_image(c, &img) => Some(img),
+        _ => None,
+    };
+    if preloaded.is_none() {
+        render::invalidate_image(c);
+    }
+    let img: Image = if let Some(img) = preloaded { img } else { loop {
         if let Some(img) = render::read_image(c) {
             if render::verify_image(c, &img) {
                 break img;
@@ -218,7 +227,7 @@ pub extern "C" fn main() -> i16 {
             c.poke(0xD020, 2);
             c.poke(0xD020, 0);
         }
-    };
+    } };
     if img.bg_rows < layout::ROWS {
         fatal(c, 7);
     }

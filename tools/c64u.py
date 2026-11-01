@@ -152,6 +152,9 @@ def main():
         dev.write_reu(data)
         print(f'uploaded {len(data)} bytes to REU 0 in {time.time() - t0:.1f}s')
     elif args.cmd == 'run':
+        # Clear the previous image's magic: the PRG starts on an image already in the REU when it is
+        # complete and stamped for it, and `upload-reu` follows `run` here.
+        dev.write_reu(bytes(8))
         dev.run_prg(args.prg)
         print('running', args.prg)
     elif args.cmd == 'hold':
