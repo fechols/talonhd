@@ -3,9 +3,9 @@ name hd.ship.talon
 canvas 36 66
 orient roll=9 roll_max_deg=60
 material hull 0 2 1.00 void dark light
-material trim 0 2 0.45 void dark light
-material canopy 0 1 0.67 dark light hot
-material glow 1 0 0.80 hot
+material trim 0 2 0.59 void dark light
+material canopy 0 1 0.80 dark light hot
+material glow 1 0 0.87 hot
 v 35.9553 -19.1536 -3.9636
 v 34.7564 -13.3760 -3.1589
 v 35.1343 -25.7591 -3.4832

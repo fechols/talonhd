@@ -3,7 +3,7 @@ id = "hd.art"
 kind = "hd_art"
 name = "ART DIRECTION"
 status = "approved"
-revision = 1
+revision = 2
 
 # Ludo 3D: `ludo model create-image` (the render to convert) then `ludo model create` (GLB).
 # The image is converted as-is, so it must show the whole object, flat paint per part, nothing else.
@@ -99,7 +99,7 @@ The eye always finds the brightest moving shape at the bottom of the screen.
 
 Crystal, cores, enemy bullets, muzzles: anything that belongs to the Lattice is `hot`, on every stage.
 Captured Accord machines are `dark` hulls with `hot` crystal growing through them. Pure Lattice drones are
-`hot` facets over `dark`. The player learns one rule once: **hot hurts**.
+`hot` facets over `dark`. The player learns one rule once: **hot hurts**. Weapons are `hot` too, even when the Accord built them: a captured cannon's barrel glows.
 
 ## 5 One light, faceted
 
@@ -152,3 +152,4 @@ Nothing is accepted from Ludo until the lineup sheet has been looked at by a hum
 - Date: 2026-10-31
 - Approver: fechols (the user)
 - Decision: approved (whole HD layer approved at once, "Approve all, start Ludo")
+- rev 2 (2026-10-31): "weapons are hot" added to section 4 (from the GANTRY QUEEN review)

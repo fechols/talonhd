@@ -156,8 +156,8 @@ class Checker:
             if not mat.get("source"):
                 self.err(data, f"{label}: material {mat.get('name')} needs a source paint description")
         gen = m.get("ludo", {}).get("generator")
-        if gen not in ("hero", "prop"):
-            self.err(data, f"{label}: ludo.generator must be hero or prop")
+        if gen not in ("hero", "prop", "hand"):
+            self.err(data, f"{label}: ludo.generator must be hero, prop or hand (hand: built in src/hand.rs)")
         for part in m.get("parts", []):
             if len(part.get("canvas", [])) != 2 or max(part["canvas"]) > 512:
                 self.err(data, f"{label}: part {part.get('id')} canvas")
@@ -269,6 +269,8 @@ def export_prompts(include_all: bool) -> int:
             if not include_all and data.get("status") not in APPROVED:
                 continue
             for m in data.get("models", []):
+                if m.get("ludo", {}).get("generator") == "hand":
+                    continue  # built in src/hand.rs, nothing to ask Ludo for
                 b = base[m["of"]]
                 req = model_request(art, m["of"], b.get("identity", ""), b.get("silhouette", ""), b.get("materials", ""), m)
                 (PROMPTS / f"{m['of']}.json").write_text(json.dumps(req, indent=2) + "\n", encoding="utf-8")

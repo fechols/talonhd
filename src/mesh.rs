@@ -83,6 +83,30 @@ pub fn parse(text: &str) -> Result<ModelFile, String> {
     Ok(out)
 }
 
+/// The `.mesh` text of a model (the inverse of [`parse`]).
+pub fn to_text(m: &ModelFile) -> String {
+    let role = |c: u8| ["void", "dark", "light", "hot"][c as usize & 3];
+    let mut out = format!("TMESH1\nname {}\ncanvas {} {}\norient", m.name, m.canvas.0, m.canvas.1);
+    for (k, v) in &m.orient {
+        out += &format!(" {k}={v}");
+    }
+    out.push('\n');
+    for (i, mat) in m.mesh.materials.iter().enumerate() {
+        out += &format!("material m{i} {} {} {:.2}", mat.emissive as u8, mat.floor, mat.albedo);
+        for &c in &mat.ramp {
+            out += &format!(" {}", role(c));
+        }
+        out.push('\n');
+    }
+    for v in &m.mesh.verts {
+        out += &format!("v {:.4} {:.4} {:.4}\n", v[0], v[1], v[2]);
+    }
+    for (t, mat) in m.mesh.tris.iter().zip(&m.mesh.mats) {
+        out += &format!("f {} {} {} {}\n", t[0], t[1], t[2], mat);
+    }
+    out
+}
+
 pub fn load(path: &Path) -> Result<ModelFile, String> {
     parse(&std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?)
 }
@@ -138,6 +162,15 @@ pub fn code_share(img: &SpriteImage) -> [f64; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_round_trips() {
+        let q = crate::hand::gantry_queen();
+        let back = parse(&to_text(&q)).unwrap();
+        assert_eq!(back.mesh.tris, q.mesh.tris);
+        assert_eq!(back.canvas, q.canvas);
+        assert_eq!(back.orientations().len(), 49);
+    }
 
     #[test]
     fn parses_and_orients() {

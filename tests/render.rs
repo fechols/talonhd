@@ -215,3 +215,22 @@ fn z_order_is_stable_painters() {
     let order: Vec<u16> = list.iter().map(|s| s.frame).collect();
     assert_eq!(order, [3, 1, 4, 5, 0, 2]);
 }
+
+#[test]
+fn image_verification_and_invalidation() {
+    let mut rng = Rng(31337);
+    let pano = panorama(&mut rng, 30);
+    let frames = vec![sprite(&mut rng, 64, 64), sprite(&mut rng, 512, 300)];
+    let image = bake::build_image(&pano, &frames, 0).unwrap();
+    let mut m = Machine::new(&image);
+    let img = render::read_image(&mut m).expect("header");
+    assert_eq!(img.size as usize, image.len());
+    assert!(render::verify_image(&mut m, &img), "a complete image verifies");
+    // A partial upload: the tail has not arrived yet.
+    let mut partial = Machine::new(&image[..image.len() / 2]);
+    let pimg = render::read_image(&mut partial).expect("header arrived first");
+    assert!(!render::verify_image(&mut partial, &pimg), "a partial image must not verify");
+    // Invalidation erases the magic.
+    render::invalidate_image(&mut m);
+    assert!(render::read_image(&mut m).is_none());
+}

@@ -15,7 +15,7 @@
 //!
 //! [`present`] then shows the buffer; call it during vertical blank.
 
-use crate::format::{self, column, frame, header, le16, le24, phase};
+use crate::format::{self, column, frame, header, le16, le24, le32, phase};
 use crate::hw::{self, Hw};
 use crate::hud;
 use crate::layout::{self, Buffer, job};
@@ -69,6 +69,9 @@ pub struct Image {
     pub directory: u32,
     /// REU address of the HUD's static sprite blocks.
     pub hud: u32,
+    /// Image size and the additive checksum of bytes `HEADER_LEN..size`.
+    pub size: u32,
+    pub checksum: u32,
 }
 
 fn record<H: Hw + ?Sized, const N: usize>(hw: &mut H, addr: u32) -> [u8; N] {
@@ -103,7 +106,38 @@ pub fn read_image<H: Hw + ?Sized>(hw: &mut H) -> Option<Image> {
         frames: le16(&h, header::FRAMES),
         directory: le24(&h, header::DIRECTORY),
         hud: le24(&h, header::HUD),
+        size: le32(&h, header::SIZE),
+        checksum: le32(&h, header::CHECKSUM),
     })
+}
+
+/// Erase the image magic in the REU. The PRG does this at boot, so an image
+/// left over from an earlier upload can't be mistaken for the one about to
+/// arrive (the device uploads after starting the PRG).
+pub fn invalidate_image<H: Hw + ?Sized>(hw: &mut H) {
+    hw::init(hw);
+    hw.fill(layout::RECORD, 8, 0);
+    hw::stash(hw, layout::RECORD, 0, 8);
+}
+
+/// True when the whole image has arrived: the additive checksum over
+/// `HEADER_LEN..size` matches the header. Reads through `SEG_BUF` in
+/// `MAX_DMA` chunks.
+pub fn verify_image<H: Hw + ?Sized>(hw: &mut H, img: &Image) -> bool {
+    if img.size <= format::HEADER_LEN || img.size > format::REU_SIZE {
+        return false;
+    }
+    let mut sum = 0u32;
+    let mut addr = format::HEADER_LEN;
+    while addr < img.size {
+        let n = (img.size - addr).min(format::MAX_DMA as u32) as u16;
+        hw::fetch(hw, addr, layout::SEG_BUF, n);
+        for i in 0..n {
+            sum = sum.wrapping_add(hw.peek(layout::SEG_BUF + i) as u32);
+        }
+        addr += n as u32;
+    }
+    sum == img.checksum
 }
 
 /// Show `pal`: one `$D021` write, a fill of both buffers' screen RAM and of
@@ -299,7 +333,7 @@ pub fn draw_column<H: Hw + ?Sized>(hw: &mut H) {
     let y = peek16(hw, layout::JOB + job::Y);
     let top = peek16(hw, layout::JOB + job::TOP);
     let bot = peek16(hw, layout::JOB + job::BOT);
-    let data = hw.peek(layout::JOB + job::DATA) as u32
+    let mut data = hw.peek(layout::JOB + job::DATA) as u32
         | (hw.peek(layout::JOB + job::DATA + 1) as u32) << 8
         | (hw.peek(layout::JOB + job::DATA + 2) as u32) << 16;
     let count = peek16(hw, layout::JOB + job::COUNT);
@@ -314,7 +348,9 @@ pub fn draw_column<H: Hw + ?Sized>(hw: &mut H) {
         if line >= bot {
             break;
         }
-        if b1 & format::SEG_MIX != 0 {
+        if b1 & format::SEG_SKIP != 0 {
+            data = data.wrapping_sub(b2 as u32 | (b3 as u32) << 8) & 0xFF_FFFF;
+        } else if b1 & format::SEG_MIX != 0 {
             if line >= top {
                 let a = dst.wrapping_add(layout::line_offset(y.wrapping_add(line)));
                 let v = hw.peek(a) & b3 | b2;

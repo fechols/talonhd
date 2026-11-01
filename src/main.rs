@@ -5,6 +5,7 @@
 //! talonhd preview [--reu FILE] [--t N] [--out PNG]
 //! talonhd compare [--reu FILE] --dump DIR [--t N]
 //! talonhd bake-model <file.mesh> [--palette v,d,l,h] [--out PNG]   orientation sheet + light share
+//! talonhd hand-models                                             write the hand-built models' .mesh files
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -43,6 +44,7 @@ fn main() -> ExitCode {
         "preview" => cmd_preview(&args),
         "compare" => cmd_compare(&args),
         "bake-model" => cmd_bake_model(&argv[1..]),
+        "hand-models" => cmd_hand_models(),
         other => Err(format!("unknown command {other}")),
     };
     match result {
@@ -254,5 +256,15 @@ fn cmd_bake_model(argv: &[String]) -> Result<(), String> {
         share[3] / n * 100.0
     );
     println!("wrote {}", out.display());
+    Ok(())
+}
+
+/// Write every hand-built model (`src/hand.rs`) to `assets/models/<id>.mesh`.
+fn cmd_hand_models() -> Result<(), String> {
+    for (id, m) in talonhd::hand::all() {
+        let path = PathBuf::from(format!("assets/models/{id}.mesh"));
+        write(&path, mesh::to_text(&m).as_bytes())?;
+        println!("{id}: {} triangles, {} vertices -> {}", m.mesh.tris.len(), m.mesh.verts.len(), path.display());
+    }
     Ok(())
 }

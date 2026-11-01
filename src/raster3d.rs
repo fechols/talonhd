@@ -101,6 +101,74 @@ impl Mesh {
         }
     }
     /// Append `other`, offset by `at`, with its materials remapped by `mat_base`.
+    /// A ring of `n` points at radius `r` and height `z` (x right, y forward), starting at `phase` radians.
+    pub fn ring(n: usize, r: f64, z: f64, phase: f64) -> Vec<V3> {
+        (0..n)
+            .map(|i| {
+                let a = phase + i as f64 * std::f64::consts::TAU / n as f64;
+                [r * a.cos(), r * a.sin(), z]
+            })
+            .collect()
+    }
+    /// Quads joining two rings of equal length (closed loop).
+    pub fn loft(&mut self, a: &[V3], b: &[V3], mat: u8) {
+        for i in 0..a.len() {
+            let j = (i + 1) % a.len();
+            self.poly(&[a[i], a[j], b[j], b[i]], mat);
+        }
+    }
+    /// A box beam from `p0` to `p1`, `w` wide (horizontal, across the beam) and `h` tall (z).
+    pub fn beam(&mut self, p0: V3, p1: V3, w: f64, h: f64, mat: u8) {
+        let d = sub(p1, p0);
+        let side = normalize(cross(d, [0.0, 0.0, 1.0]));
+        let up = normalize(cross(side, d));
+        let corner = |p: V3, s: f64, u: f64| -> V3 {
+            [p[0] + side[0] * s * w / 2.0 + up[0] * u * h / 2.0, p[1] + side[1] * s * w / 2.0 + up[1] * u * h / 2.0, p[2] + side[2] * s * w / 2.0 + up[2] * u * h / 2.0]
+        };
+        let a: Vec<V3> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().map(|&(s, u)| corner(p0, s, u)).collect();
+        let b: Vec<V3> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().map(|&(s, u)| corner(p1, s, u)).collect();
+        self.loft(&a, &b, mat);
+        self.poly(&a, mat);
+        self.poly(&b, mat);
+    }
+    /// An `n`-sided prism (barrel, mast) of radius `r` from `p0` to `p1`, capped.
+    pub fn tube(&mut self, p0: V3, p1: V3, r: f64, n: usize, mat: u8, cap_mat: u8) {
+        let d = normalize(sub(p1, p0));
+        let helper = if d[2].abs() < 0.9 { [0.0, 0.0, 1.0] } else { [1.0, 0.0, 0.0] };
+        let u = normalize(cross(d, helper));
+        let v = cross(d, u);
+        let ring = |c: V3| -> Vec<V3> {
+            (0..n)
+                .map(|i| {
+                    let a = i as f64 * std::f64::consts::TAU / n as f64;
+                    let (s, co) = a.sin_cos();
+                    [c[0] + r * (u[0] * co + v[0] * s), c[1] + r * (u[1] * co + v[1] * s), c[2] + r * (u[2] * co + v[2] * s)]
+                })
+                .collect()
+        };
+        let (a, b) = (ring(p0), ring(p1));
+        self.loft(&a, &b, mat);
+        self.poly(&a, mat);
+        self.poly(&b, cap_mat);
+    }
+    /// A pointed shard: a triangular base around `base` facing `tip`.
+    pub fn shard(&mut self, base: V3, tip: V3, r: f64, mat: u8) {
+        let d = normalize(sub(tip, base));
+        let helper = if d[2].abs() < 0.9 { [0.0, 0.0, 1.0] } else { [1.0, 0.0, 0.0] };
+        let u = normalize(cross(d, helper));
+        let v = cross(d, u);
+        let b: Vec<V3> = (0..3)
+            .map(|i| {
+                let a = i as f64 * std::f64::consts::TAU / 3.0;
+                let (s, c) = a.sin_cos();
+                [base[0] + r * (u[0] * c + v[0] * s), base[1] + r * (u[1] * c + v[1] * s), base[2] + r * (u[2] * c + v[2] * s)]
+            })
+            .collect();
+        for i in 0..3 {
+            self.tri(b[i], b[(i + 1) % 3], tip, mat);
+        }
+        self.poly(&b, mat);
+    }
     pub fn add(&mut self, other: &Mesh, at: V3, mat_base: u8) {
         let base = self.verts.len() as u32;
         self.verts.extend(other.verts.iter().map(|v| [v[0] + at[0], v[1] + at[1], v[2] + at[2]]));
@@ -163,10 +231,11 @@ fn shade(m: &Material, normal: V3) -> (u8, u8) {
         let c = *m.ramp.last().unwrap();
         return (c, c);
     }
-    // Normalized so a face pointing straight up (at the viewer) is fully lit: flat tops read as
-    // solid light and only faces turned away from the key light step down the ramp.
+    // Normalized so a face pointing straight up (at the viewer) gets 1.0; faces tilted toward the key
+    // light get up to 1/l.z (~1.42): with an albedo below 1, flat tops sit mid-ramp and light-facing
+    // facets catch a highlight.
     let l = normalize(LIGHT);
-    let lambert = (dot(normal, l) / l[2]).clamp(0.0, 1.0);
+    let lambert = (dot(normal, l) / l[2]).clamp(0.0, 1.0 / l[2]);
     let lit = (AMBIENT + (1.0 - AMBIENT) * lambert) * m.albedo;
     // Position along the ramp; the checker covers only the middle 40 % of each step, so most faces
     // are solid and a checker always means a real mid-tone.

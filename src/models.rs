@@ -21,8 +21,9 @@ pub const HOT: u8 = 3;
 /// Tech-scene palette: S1 BREAKWATER (docs/story/hd/02-ladder.md): blue sea, mid grey, white, cyan.
 pub const DEMO_PALETTE: Palette = Palette::new(6, 12, 1, 3);
 
-/// The approved S1 ship, if its prepared model exists (`tools/model_prep.py`).
+/// The approved S1 ship and boss, if their prepared models exist (`tools/model_prep.py`).
 pub const TALON_MESH: &str = "assets/models/hd.ship.talon.mesh";
+pub const QUEEN_MESH: &str = "assets/models/boss.s1.gantry_queen.mesh";
 
 /// The player's stand-in fighter: nose +y, about 64 long, 60 across.
 pub fn fighter() -> Mesh {
@@ -148,9 +149,18 @@ fn banks(n: u16, max: f64) -> impl Iterator<Item = f64> {
     (0..n).map(move |i| (i as f64 / (n - 1) as f64 * 2.0 - 1.0) * max)
 }
 
-/// The tech scene with the Ludo TALON as the player's ship when its mesh is present.
+/// The tech scene with the Ludo TALON as the player's ship and the Ludo GANTRY QUEEN as the boss when
+/// their meshes are present.
 pub fn demo_frames_with_assets() -> Vec<SpriteImage> {
     let mut frames = demo_frames();
+    if let Ok(m) = crate::mesh::load(std::path::Path::new(QUEEN_MESH)) {
+        let rendered = m.render_all();
+        assert_eq!(rendered.len(), demo::BOSS_BANKS as usize, "boss roll samples must match BOSS_BANKS");
+        for (i, f) in rendered.into_iter().enumerate() {
+            assert_eq!((f.w, f.h), (demo::BOSS_SIZE, demo::BOSS_SIZE));
+            frames[demo::BOSS_FRAME as usize + i] = f;
+        }
+    }
     if let Ok(m) = crate::mesh::load(std::path::Path::new(TALON_MESH)) {
         let view = View::centered(demo::PLAYER_W, demo::PLAYER_H, 1.0);
         let max = m.orient.get("roll_max_deg").copied().unwrap_or(60.0).to_radians();

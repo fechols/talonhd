@@ -111,9 +111,14 @@ pub extern "C" fn main() -> i16 {
     c.poke(0xD011, 0x0B); // blank while setting up
     // Wait (flashing the border) until a TALON HD image is in the REU, so it
     // can be uploaded after starting the PRG, past any REU preload on reset.
+    // Erase any earlier image's magic, then wait for a complete new one
+    // (magic present and the whole-image checksum right).
+    render::invalidate_image(c);
     let img: Image = loop {
         if let Some(img) = render::read_image(c) {
-            break img;
+            if render::verify_image(c, &img) {
+                break img;
+            }
         }
         for _ in 0..200 {
             c.poke(0xD020, 2);

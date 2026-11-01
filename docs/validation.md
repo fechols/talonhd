@@ -68,3 +68,71 @@ Package `talonhd.prg` `8f656672d89d9281…`, `talonhd.reu` `8ea313e84db57c07…`
   should verify the image checksum, not just the magic (todo).
 - Render 7.8–11.6 ms per frame with the HUD; `dump --hold` at t=1316 → `compare`: **0 mismatched bytes**
   (bitmap, screen, color RAM; sprites are not part of the dump).
+
+## 2026-10-31 — The GANTRY QUEEN (Ludo, 512×512 flying boss) and a race-free boot
+
+Ludo: 2 credits for four `model create-image` renders, then 16 for `model create --model hero --rig`
+(24,000-face target) = **18** (pilot total 35). The art director picked v2: the only render with exactly two
+hazard-striped cannons, four splayed legs, the smoked cab and the purple facet ring. GLB: 24,892 triangles,
+rigged (one skin), tower along +y. Sources in `assets/ludo/boss.s1.gantry_queen/` (GLB sha256
+`f0fca665cd38ed24…`).
+
+- `model_prep --forward z --up y`: concrete 16,282 / plates 1,930 / cab 5,716 / arms 964 faces → 3,000 triangles
+  (5.9 s). The tower stands toward the viewer: 478 × 512 hires px footprint, 775 px tall.
+  `assets/models/boss.s1.gantry_queen.mesh` (sha256 `06df22ff1dc97dd4…`).
+- 9 roll frames (±24°) at 512×512 × 4 phases: 1,004,950 REU bytes. Code share void 15 / dark 65 / light 12 /
+  hot 9 % (enemy light ≤ 15 %: passes).
+- Review fixes:
+  - Material albedo is now relative to the model's brightest paint (absolute albedo put the whole concrete
+    hull in the void/dark checker).
+  - The cab and arm paint sources name their colors (S1 models rev 2).
+  - The arms' ramp changed light → hot, and "weapons are hot" was added to the art direction (S1 models rev 3,
+    art direction rev 2).
+  - The canvas centre sits at screen line −50, so the crown hangs over the top third of the screen.
+- C64U (`talonhd.prg` `95e0afbf7bbfd2e3…`): 8.6–14.2 ms per frame with the boss across the screen; held frame
+  t=1185 → **0 mismatched bytes**.
+
+Boot race fixed (`talonhd.prg` `d89ff0078331f118…`): the PRG erases the REU magic at boot (`invalidate_image`),
+then starts only when the magic is back **and** the whole-image checksum matches (`verify_image`; a test
+checks that a half-uploaded image doesn't verify). Two consecutive run + upload cycles each came up on the
+first try (previously about half the first runs failed); held frame t=897 → 0 mismatched bytes.
+
+## 2026-10-31 — Smoother boss: 49 roll frames and a fine sway
+
+The user found the boss's motion too jumpy. Cause: 9 roll samples 6° apart move the roof of the 775-px tower
+by ~40 hires px per step, and the sway ran on a 256-step sine (3-4 px jumps every other frame).
+- 49 roll samples (1°, S1 models rev 4): 5,419,584 REU bytes for the boss, level image 5,518,505 bytes (32.9 %
+  of 16 MiB, 11 REU banks; `bank_wraps` 0).
+- Sway and bank driven by a 1024-step sine (`demo::isin_fine`): at most ~1.17 px per frame.
+- C64U (`talonhd.prg` `912d620acfbd7bfe…`, `talonhd.reu` `75fa4fe338780aa2…`): the 6.4 s upload is accepted on the
+  first run (checksum wait); 8.7–14.4 ms per frame; held frame t=940 → **0 mismatched bytes**.
+
+## 2026-10-31 — The GANTRY QUEEN by hand; Skip segments
+
+The user found the Ludo boss model didn't look good from above and asked the art director to build it. The
+Ludo GLB stays in `assets/ludo/boss.s1.gantry_queen/` as a record; the bible block now says
+`generator = "hand"` (S1 models rev 5; palette law rev 4: BOSS triangle floor 500).
+- `src/hand.rs` `gantry_queen()`, 698 triangles:
+  - a faceted dome cut like a gem: broad ~30° rings, each showing 8 differently lit facets;
+  - a crystal crown band and eight crystal spikes;
+  - a hazard mast and beacon;
+  - two cannon arms with forward twin barrels (hot, glowing muzzles);
+  - four legs splayed sideways with knee crystals and foot pads;
+  - a short ribbed shaft.
+
+  Authored at full size and shown at 0.6 (`QUEEN_SCALE`): crown ≈ one screen wide, legs and cannons ≈ two.
+  Written by `talonhd hand-models` to `assets/models/boss.s1.gantry_queen.mesh` (sha256 `34266a41d119d460…`).
+- Raster3d: faces turned toward the key light may exceed a flat top (lambert up to 1/l.z), so light-facing
+  facets catch a highlight. Golden hashes regenerated (boss and drones changed; the player's stand-in did not).
+- **Skip segments** (`SEG_SKIP`, b1 bit 6): a column's REU data stores only run bytes; a Skip before the run
+  after a gap ≥ 8 lines subtracts the gap from DATA. They changed together:
+  - the Rust reference `draw_column`;
+  - `asm/blit.S` (which now rewrites `JOB+DATA`);
+  - `tools/test_blit.py` (random Skips; DATA writable).
+
+  400 random columns match. On the full-size hand model, Skip cut 11.5 MB → 8.8 MB.
+- Staging: canvas centre at line −60, dipping ±40 lines over 2048 frames; 49 roll frames (1°).
+- Level image 3,885,437 bytes (23.2 % of 16 MiB; boss ~3.8 MB). Code share void 11 / dark 66 / light 7 /
+  hot 16 % (at full scale).
+- C64U (`talonhd.prg` `7dbe3ef8b5218e52…`, `talonhd.reu` `42719c0a3ed191b7…`): accepted on the first run; 9.7–14.6
+  ms per frame; held frame t=540 → **0 mismatched bytes**.

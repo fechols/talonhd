@@ -3,7 +3,7 @@ id = "hd.rules"
 kind = "hd_rules"
 name = "PALETTE LAW"
 status = "approved"
-revision = 3
+revision = 4
 
 # The four global multicolor codes and their roles. Every pixel on screen is one of these four.
 [roles]
@@ -50,7 +50,7 @@ S = { max_canvas = 32, tris = [40, 120] }
 M = { max_canvas = 80, tris = [120, 300] }
 L = { max_canvas = 128, tris = [300, 700] }
 XL = { max_canvas = 256, tris = [700, 1500] }
-BOSS = { max_canvas = 512, tris = [1500, 4000] }
+BOSS = { max_canvas = 512, tris = [500, 4000] }
 
 [light_share]
 player_min = 0.35         # >= 35 % of the player's opaque pixels are light (or light-checker)
@@ -121,7 +121,7 @@ boss that shares the same four colors. The bake measures it and fails over budge
 | M | ≤ 80 | 120-300 | the player's ship, GANNET, CRAWLER |
 | L | ≤ 128 | 300-700 | heavy units, ground emplacements |
 | XL | ≤ 256 | 700-1500 | midbosses |
-| BOSS | ≤ 512 | 1500-4000 | stage bosses: always bigger than the screen |
+| BOSS | ≤ 512 | 500-4000 | stage bosses: always bigger than the screen |
 
 A multicolor pixel is two hires pixels wide, so a 512-pixel canvas is 1024 hires pixels across: more than
 three screens wide.
@@ -133,3 +133,4 @@ three screens wide.
 - Decision: approved (whole HD layer approved at once, "Approve all, start Ludo")
 - rev 2 (2026-10-31): M canvas limit 64 -> 80 so the longest player ships fit (number fix with the ship canvases)
 - rev 3 (2026-10-31): player hull floor is solid dark (art-direction review of the TALON pilot)
+- rev 4 (2026-10-31): BOSS triangle floor 1500 -> 500 (hand-built bosses are lean on purpose)

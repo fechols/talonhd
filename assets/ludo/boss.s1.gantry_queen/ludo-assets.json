@@ -1,0 +1,189 @@
+{
+  "assets": [
+    {
+      "file": "queen_render-v2.webp",
+      "command": "model create-image",
+      "operation_id": "create3DModelImage",
+      "body": {
+        "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: an airfield control tower turned walker: octagonal glass cab on a ribbed concrete shaft, crystal plates bolted over it, two stubby cannon arms. Shape: octagon on a square, two side arms, tapering lower block, four splayed legs. Paint: white-grey concrete, smoked glass cab ringed with purple crystal facets, light blue crystal armour plates, hazard-striped radar mast. Parts painted distinctly: concrete: ribbed concrete shaft; plates: crystal plates bolted over it; cab: smoked dark glass cab; arms: yellow-striped cannon arms. Only the object. No text, no markings, no pilot, no people, no base or stand."
+      },
+      "job_id": "c60754c0-b9d4-4f02-b57f-f6ff6f246318",
+      "credits": 0.5,
+      "created_at": "2026-11-01T02:53:30.318Z",
+      "result_urls": {
+        "url": "https://storage.googleapis.com/ludo-assets/api/b7cca7bf101077c516140568fe230ac5.webp"
+      },
+      "variation_set": "339c4f2d",
+      "variation": 2
+    },
+    {
+      "file": "queen_render-v2.png",
+      "command": "model create-image",
+      "operation_id": "create3DModelImage",
+      "body": {
+        "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: an airfield control tower turned walker: octagonal glass cab on a ribbed concrete shaft, crystal plates bolted over it, two stubby cannon arms. Shape: octagon on a square, two side arms, tapering lower block, four splayed legs. Paint: white-grey concrete, smoked glass cab ringed with purple crystal facets, light blue crystal armour plates, hazard-striped radar mast. Parts painted distinctly: concrete: ribbed concrete shaft; plates: crystal plates bolted over it; cab: smoked dark glass cab; arms: yellow-striped cannon arms. Only the object. No text, no markings, no pilot, no people, no base or stand."
+      },
+      "job_id": "c60754c0-b9d4-4f02-b57f-f6ff6f246318",
+      "credits": 0.5,
+      "created_at": "2026-11-01T02:53:30.318Z",
+      "result_urls": {
+        "url": "https://storage.googleapis.com/ludo-assets/api/b7cca7bf101077c516140568fe230ac5.webp"
+      },
+      "variation_set": "339c4f2d",
+      "variation": 2
+    },
+    {
+      "file": "queen_render-v1.webp",
+      "command": "model create-image",
+      "operation_id": "create3DModelImage",
+      "body": {
+        "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: an airfield control tower turned walker: octagonal glass cab on a ribbed concrete shaft, crystal plates bolted over it, two stubby cannon arms. Shape: octagon on a square, two side arms, tapering lower block, four splayed legs. Paint: white-grey concrete, smoked glass cab ringed with purple crystal facets, light blue crystal armour plates, hazard-striped radar mast. Parts painted distinctly: concrete: ribbed concrete shaft; plates: crystal plates bolted over it; cab: smoked dark glass cab; arms: yellow-striped cannon arms. Only the object. No text, no markings, no pilot, no people, no base or stand."
+      },
+      "job_id": "70a56324-9e98-4140-bd0a-63440f163865",
+      "credits": 0.5,
+      "created_at": "2026-11-01T02:53:33.676Z",
+      "result_urls": {
+        "url": "https://storage.googleapis.com/ludo-assets/api/e087a6cbc60662d8c511747dc8c77e4b.webp"
+      },
+      "variation_set": "339c4f2d",
+      "variation": 1
+    },
+    {
+      "file": "queen_render-v1.png",
+      "command": "model create-image",
+      "operation_id": "create3DModelImage",
+      "body": {
+        "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: an airfield control tower turned walker: octagonal glass cab on a ribbed concrete shaft, crystal plates bolted over it, two stubby cannon arms. Shape: octagon on a square, two side arms, tapering lower block, four splayed legs. Paint: white-grey concrete, smoked glass cab ringed with purple crystal facets, light blue crystal armour plates, hazard-striped radar mast. Parts painted distinctly: concrete: ribbed concrete shaft; plates: crystal plates bolted over it; cab: smoked dark glass cab; arms: yellow-striped cannon arms. Only the object. No text, no markings, no pilot, no people, no base or stand."
+      },
+      "job_id": "70a56324-9e98-4140-bd0a-63440f163865",
+      "credits": 0.5,
+      "created_at": "2026-11-01T02:53:33.676Z",
+      "result_urls": {
+        "url": "https://storage.googleapis.com/ludo-assets/api/e087a6cbc60662d8c511747dc8c77e4b.webp"
+      },
+      "variation_set": "339c4f2d",
+      "variation": 1
+    },
+    {
+      "file": "queen_render-v4.webp",
+      "command": "model create-image",
+      "operation_id": "create3DModelImage",
+      "body": {
+        "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: an airfield control tower turned walker: octagonal glass cab on a ribbed concrete shaft, crystal plates bolted over it, two stubby cannon arms. Shape: octagon on a square, two side arms, tapering lower block, four splayed legs. Paint: white-grey concrete, smoked glass cab ringed with purple crystal facets, light blue crystal armour plates, hazard-striped radar mast. Parts painted distinctly: concrete: ribbed concrete shaft; plates: crystal plates bolted over it; cab: smoked dark glass cab; arms: yellow-striped cannon arms. Only the object. No text, no markings, no pilot, no people, no base or stand."
+      },
+      "job_id": "1a971651-a5f9-46d6-a242-d0c2f10fc4d5",
+      "credits": 0.5,
+      "created_at": "2026-11-01T02:53:47.055Z",
+      "result_urls": {
+        "url": "https://storage.googleapis.com/ludo-assets/api/7e466d8ca32a73b7db96008c9d368df7.webp"
+      },
+      "variation_set": "339c4f2d",
+      "variation": 4
+    },
+    {
+      "file": "queen_render-v4.png",
+      "command": "model create-image",
+      "operation_id": "create3DModelImage",
+      "body": {
+        "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: an airfield control tower turned walker: octagonal glass cab on a ribbed concrete shaft, crystal plates bolted over it, two stubby cannon arms. Shape: octagon on a square, two side arms, tapering lower block, four splayed legs. Paint: white-grey concrete, smoked glass cab ringed with purple crystal facets, light blue crystal armour plates, hazard-striped radar mast. Parts painted distinctly: concrete: ribbed concrete shaft; plates: crystal plates bolted over it; cab: smoked dark glass cab; arms: yellow-striped cannon arms. Only the object. No text, no markings, no pilot, no people, no base or stand."
+      },
+      "job_id": "1a971651-a5f9-46d6-a242-d0c2f10fc4d5",
+      "credits": 0.5,
+      "created_at": "2026-11-01T02:53:47.055Z",
+      "result_urls": {
+        "url": "https://storage.googleapis.com/ludo-assets/api/7e466d8ca32a73b7db96008c9d368df7.webp"
+      },
+      "variation_set": "339c4f2d",
+      "variation": 4
+    },
+    {
+      "file": "queen_render-v3.webp",
+      "command": "model create-image",
+      "operation_id": "create3DModelImage",
+      "body": {
+        "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: an airfield control tower turned walker: octagonal glass cab on a ribbed concrete shaft, crystal plates bolted over it, two stubby cannon arms. Shape: octagon on a square, two side arms, tapering lower block, four splayed legs. Paint: white-grey concrete, smoked glass cab ringed with purple crystal facets, light blue crystal armour plates, hazard-striped radar mast. Parts painted distinctly: concrete: ribbed concrete shaft; plates: crystal plates bolted over it; cab: smoked dark glass cab; arms: yellow-striped cannon arms. Only the object. No text, no markings, no pilot, no people, no base or stand."
+      },
+      "job_id": "fdd58e23-97b7-4411-ad80-0c7796b2ac41",
+      "credits": 0.5,
+      "created_at": "2026-11-01T02:53:53.837Z",
+      "result_urls": {
+        "url": "https://storage.googleapis.com/ludo-assets/api/4a32b9ef98355c4937a8b4ec4487193f.webp"
+      },
+      "variation_set": "339c4f2d",
+      "variation": 3
+    },
+    {
+      "file": "queen_render-v3.png",
+      "command": "model create-image",
+      "operation_id": "create3DModelImage",
+      "body": {
+        "prompt": "A clean 3D render of a single hard-surface game model, low-poly with crisp flat facets and sharp edges, each part painted one flat matte color, seen from above at a three-quarter angle with the whole object in view, centred, plain white background, soft even studio light, no shadow on the ground. Subject: an airfield control tower turned walker: octagonal glass cab on a ribbed concrete shaft, crystal plates bolted over it, two stubby cannon arms. Shape: octagon on a square, two side arms, tapering lower block, four splayed legs. Paint: white-grey concrete, smoked glass cab ringed with purple crystal facets, light blue crystal armour plates, hazard-striped radar mast. Parts painted distinctly: concrete: ribbed concrete shaft; plates: crystal plates bolted over it; cab: smoked dark glass cab; arms: yellow-striped cannon arms. Only the object. No text, no markings, no pilot, no people, no base or stand."
+      },
+      "job_id": "fdd58e23-97b7-4411-ad80-0c7796b2ac41",
+      "credits": 0.5,
+      "created_at": "2026-11-01T02:53:53.837Z",
+      "result_urls": {
+        "url": "https://storage.googleapis.com/ludo-assets/api/4a32b9ef98355c4937a8b4ec4487193f.webp"
+      },
+      "variation_set": "339c4f2d",
+      "variation": 3
+    },
+    {
+      "file": "queen_hero-1.glb",
+      "command": "model create",
+      "operation_id": "create3DModel",
+      "body": {
+        "image": "queen_render-v2.png",
+        "model": "hero",
+        "target_num_faces": 24000,
+        "texture_type": "simple",
+        "texture_size": 2048,
+        "rig": true
+      },
+      "job_id": "f67ad700-2322-4274-b5d5-5fd155e15804",
+      "credits": 16,
+      "created_at": "2026-11-01T02:57:11.899Z",
+      "result_urls": {
+        "model_url": "https://storage.googleapis.com/ludo-assets/api/0288e9fd794697634914cb311c719d6b.glb"
+      }
+    },
+    {
+      "file": "queen_hero-2.png",
+      "command": "model create",
+      "operation_id": "create3DModel",
+      "body": {
+        "image": "queen_render-v2.png",
+        "model": "hero",
+        "target_num_faces": 24000,
+        "texture_type": "simple",
+        "texture_size": 2048,
+        "rig": true
+      },
+      "job_id": "f67ad700-2322-4274-b5d5-5fd155e15804",
+      "credits": 16,
+      "created_at": "2026-11-01T02:57:11.899Z",
+      "result_urls": {
+        "model_url": "https://storage.googleapis.com/ludo-assets/api/0288e9fd794697634914cb311c719d6b.glb"
+      }
+    },
+    {
+      "file": "queen_hero-3.png",
+      "command": "model create",
+      "operation_id": "create3DModel",
+      "body": {
+        "image": "queen_render-v2.png",
+        "model": "hero",
+        "target_num_faces": 24000,
+        "texture_type": "simple",
+        "texture_size": 2048,
+        "rig": true
+      },
+      "job_id": "f67ad700-2322-4274-b5d5-5fd155e15804",
+      "credits": 16,
+      "created_at": "2026-11-01T02:57:11.899Z",
+      "result_urls": {
+        "model_url": "https://storage.googleapis.com/ludo-assets/api/0288e9fd794697634914cb311c719d6b.glb"
+      }
+    }
+  ]
+}

@@ -19,7 +19,8 @@ What the HD layer **replaces** in the base bible:
 - **Colors.** `[[colors]]` C64 indices and stage `inks_intent` become *intent* only. The palette a
   stage actually shows is its `02-ladder.md` palette, and an entity's colors are **roles**.
 - **Art source.** `[ludo]` 2D sprite prompts become `[model]` 3D prompts (`ludo model create-image` →
-  `ludo model create`).
+  `ludo model create`), or `generator = "hand"`: geometry built by the art director in `src/hand.rs` when a
+  Ludo model reads badly from straight above (the GANTRY QUEEN).
 
 What it **adds**: the promotion arc. QUILL is promoted at every stage clear and handed the Accord's next
 prototype, in that stage's colors.

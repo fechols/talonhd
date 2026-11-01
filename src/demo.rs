@@ -9,7 +9,7 @@ use crate::hud;
 use crate::render::Sprite;
 
 /// Frame directory layout (see `models::demo_frames`).
-pub const BOSS_BANKS: u16 = 9;
+pub const BOSS_BANKS: u16 = 49;
 pub const DRONE_YAWS: u16 = 16;
 pub const PLAYER_BANKS: u16 = 9;
 pub const BOSS_FRAME: u16 = 0;
@@ -18,6 +18,10 @@ pub const PLAYER_FRAME: u16 = DRONE_FRAME + DRONE_YAWS;
 pub const FRAMES: u16 = PLAYER_FRAME + PLAYER_BANKS;
 
 pub const BOSS_SIZE: u16 = 512;
+/// Screen line of the boss canvas centre: it hovers at the top, mostly above the screen.
+pub const BOSS_CENTER_Y: i16 = -60;
+/// The boss slowly sinks and rises this many lines about its centre (period 2048 frames).
+pub const BOSS_DIP: i16 = 40;
 pub const DRONE_W: u16 = 40;
 pub const DRONE_H: u16 = 40;
 pub const PLAYER_W: u16 = 36;
@@ -38,6 +42,18 @@ pub fn isin(p: u8) -> i16 {
 
 pub fn icos(p: u8) -> i16 {
     isin(p.wrapping_add(64))
+}
+
+/// Fine sine: `p` in 1024 steps per turn, result -127..=127. Smooth enough that a
+/// 150-pixel sway moves under a pixel per frame.
+pub fn isin_fine(p: u16) -> i16 {
+    let x = (p & 511) as i32;
+    let v = (x * (512 - x) * 127 / 65536) as i16;
+    if p & 512 == 0 { v } else { -v }
+}
+
+pub fn icos_fine(p: u16) -> i16 {
+    isin_fine(p.wrapping_add(256))
 }
 
 /// Bank frame index for a lateral velocity proxy in -127..=127: 0 is full
@@ -74,14 +90,14 @@ pub fn hud_state(t: u16) -> hud::State {
 /// Fill `out` with the sprites of demo time `t`; returns how many.
 pub fn scene(t: u16, out: &mut [Sprite; INSTANCES]) -> usize {
     let mut n = 0;
-    // The boss: sways ±150 px about the screen centre (period 512 frames),
-    // banking into each turn; bobbing a little.
-    let phase = (t >> 1) as u8;
-    let cx = 80 + isin(phase) * 150 / 127;
+    // The boss: sways ±150 px about the screen centre (period 1024 frames),
+    // banking into each turn through 49 roll angles; bobbing a little.
+    let phase = t & 1023;
+    let cx = 80 + isin_fine(phase) * 150 / 127;
     out[n] = Sprite {
-        frame: BOSS_FRAME + bank(icos(phase), BOSS_BANKS),
+        frame: BOSS_FRAME + bank(icos_fine(phase), BOSS_BANKS),
         x: cx - BOSS_SIZE as i16 / 2,
-        y: -40 - BOSS_SIZE as i16 / 2 + isin(phase.wrapping_mul(3)) * 6 / 127,
+        y: BOSS_CENTER_Y - BOSS_SIZE as i16 / 2 + isin_fine((t >> 1) & 1023) * BOSS_DIP / 127,
         z: 0,
     };
     n += 1;
@@ -121,5 +137,11 @@ mod tests {
         assert_eq!(bank(0, 9), 4);
         assert_eq!(bank(127, 9), 8);
         assert_eq!(bank(-127, 9), 0);
+        assert_eq!(bank(127, 49), 48);
+        assert_eq!(isin_fine(256), 127);
+        assert_eq!(isin_fine(768), -127);
+        // The sway tops out at ~1.17 px per frame: integer steps of at most 2.
+        let x = |t: u16| isin_fine(t & 1023) as i32 * 150 / 127;
+        assert!((0..2048u16).all(|t| (x(t + 1) - x(t)).abs() <= 2));
     }
 }

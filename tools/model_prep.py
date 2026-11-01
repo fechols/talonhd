@@ -19,7 +19,7 @@ The .mesh file is plain text, read by `talonhd bake-model` (no dependencies on e
     name <id>
     canvas <w> <h>
     orient <key>=<value> ...
-    material <name> <emissive 0|1> <floor> <albedo> <role> [<role> ...]   (albedo from the paint's luminance)
+    material <name> <emissive 0|1> <floor> <albedo> <role> [<role> ...]   (albedo from the paint's luminance, relative to the brightest paint)
     v <x> <y> <z>
     f <a> <b> <c> <material index>
 """
@@ -40,7 +40,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # Reference paint colors for `source` descriptions (longest phrase first wins).
 PAINT = {
-    "light blue": (110, 160, 235), "dark grey": (60, 60, 64), "steel grey": (110, 115, 120),
+    "light blue": (110, 160, 235), "dark grey": (60, 60, 64), "dark glass": (55, 60, 75), "smoked": (55, 60, 75), "steel grey": (110, 115, 120),
     "light grey": (190, 190, 190), "mid grey": (128, 128, 128), "cloud grey": (190, 190, 200),
     "light green": (160, 235, 150), "light red": (220, 110, 110), "light stone": (215, 205, 180),
     "safety yellow": (240, 210, 40), "cobalt blue": (40, 60, 190),
@@ -365,9 +365,14 @@ def main(argv):
     path = out / f"{req['id']}.mesh"
     orient = " ".join(f"{k}={v}" for k, v in bake.get("orient", {}).items())
     lines = ["TMESH1", f"name {req['id']}", f"canvas {bake['canvas'][0]} {bake['canvas'][1]}", f"orient {orient}"]
-    for m in materials:
+    # Albedo relative to the model's brightest lit paint: the brightest paint lights to the top of its ramp,
+    # darker paints (trim, concrete under white) sit lower, never below 0.45.
+    def paint_lum(m):
         r, g, b = paint_of(m["source"])
-        albedo = min(1.0, max(0.45, (0.299 * r + 0.587 * g + 0.114 * b) / 230.0))
+        return 0.299 * r + 0.587 * g + 0.114 * b
+    lmax = max((paint_lum(m) for m in materials if not m.get("emissive")), default=1.0)
+    for m in materials:
+        albedo = 0.45 + 0.55 * paint_lum(m) / lmax
         lines.append(f"material {m['name']} {1 if m.get('emissive') else 0} {m.get('floor', 0)} {albedo:.2f} " + " ".join(m["ramp"]))
     lines += [f"v {x:.4f} {y:.4f} {z:.4f}" for x, y, z in p]
     lines += [f"f {f[0]} {f[1]} {f[2]} {m}" for f, m in zip(faces2, mat2)]

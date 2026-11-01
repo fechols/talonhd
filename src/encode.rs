@@ -2,7 +2,7 @@
 //! encodings of column-major pixel bytes and segment lists. Vendored from
 //! gclass (`a5775bf`).
 
-use crate::format::{MAX_SPRITE_SIZE, SEG_MIX};
+use crate::format::{MAX_SPRITE_SIZE, MIN_SKIP, SEG_MIX, SEG_SKIP};
 
 /// A sprite frame in multicolor codes. `None` is transparent; `Some(code)`
 /// is an opaque pixel in any of the four global codes.
@@ -31,8 +31,11 @@ impl SpriteImage {
 
 #[derive(Clone, Debug, Default)]
 pub struct Column {
-    /// `h` bytes, one per line (pixel bits of opaque pixels).
+    /// The run bytes the REU stores, packed: from the first run's line, with
+    /// every Skip-ped gap left out.
     pub data: Vec<u8>,
+    /// Line of `data[0]` (the column's REU address is biased by it).
+    pub first: u16,
     pub segments: Vec<[u8; 4]>,
 }
 
@@ -87,8 +90,40 @@ pub fn encode_phase(img: &SpriteImage, p: u16) -> Phase {
             }
             y += 1;
         }
-        let data = if segments.is_empty() { Vec::new() } else { col_bits.to_vec() };
-        columns.push(Column { data, segments });
+        let (data, first, segments) = pack(col_bits, segments);
+        columns.push(Column { data, first, segments });
     }
     Phase { wb, columns }
+}
+
+/// Pack a column: keep only run bytes, inserting a Skip before each run that
+/// follows a gap of at least `MIN_SKIP` lines (shorter gaps stay as data).
+fn pack(col_bits: &[u8], segments: Vec<[u8; 4]>) -> (Vec<u8>, u16, Vec<[u8; 4]>) {
+    let line = |s: &[u8; 4]| s[0] as usize | ((s[1] & 1) as usize) << 8;
+    let mut data = Vec::new();
+    let mut out = Vec::with_capacity(segments.len());
+    let mut first = None;
+    let mut end = 0usize; // line after the last stored byte
+    for s in segments {
+        if s[1] & SEG_MIX != 0 {
+            out.push(s);
+            continue;
+        }
+        let (start, len) = (line(&s), s[2] as usize | (s[3] as usize) << 8);
+        match first {
+            None => first = Some(start),
+            Some(_) => {
+                let gap = start - end;
+                if gap >= MIN_SKIP {
+                    out.push([start as u8, (start >> 8) as u8 | SEG_SKIP, gap as u8, (gap >> 8) as u8]);
+                } else {
+                    data.extend_from_slice(&col_bits[end..start]);
+                }
+            }
+        }
+        data.extend_from_slice(&col_bits[start..start + len]);
+        end = start + len;
+        out.push(s);
+    }
+    (data, first.unwrap_or(0) as u16, out)
 }

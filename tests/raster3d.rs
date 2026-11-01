@@ -57,17 +57,18 @@ fn emissive_ignores_light_and_roll_changes_shading() {
 #[test]
 fn demo_frames_golden() {
     let frames = models::demo_frames();
-    let h: Vec<u64> = [0usize, 4, 8, 9, 13, 25, 29, 33].iter().map(|&i| raster3d::hash(&frames[i])).collect();
+    let (b, d, p) = (demo::BOSS_FRAME as usize, demo::DRONE_FRAME as usize, demo::PLAYER_FRAME as usize);
+    let h: Vec<u64> = [b, b + 24, b + 48, d, d + 4, p, p + 4, p + 8].iter().map(|&i| raster3d::hash(&frames[i])).collect();
     println!("{h:#018x?}");
     assert_eq!(h, GOLDEN);
 }
 
 const GOLDEN: [u64; 8] = [
-    0x584f1f432feeca72,
-    0x27a99ab3b33d53b7,
-    0x49c615524082ab8d,
-    0x395f69300f06d2f6,
-    0x932f66f83ab55db2,
+    0xa55a6779a3edc59d,
+    0x809eb627ae768b58,
+    0x246ae3f7c2304eb2,
+    0x4ecc311735df122c,
+    0x978d09a679c072cc,
     0x72d55191aae5e8f0,
     0x52695fae871540a2,
     0x3da06e5ed13076e8,

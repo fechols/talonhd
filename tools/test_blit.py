@@ -44,7 +44,7 @@ def line_offset(y):
 
 class ReuCpu(Cpu):
     def __init__(self, memory, reu):
-        super().__init__(memory, [(0xF0, 0x100), (0x100, 0x200), (0x6000, 0x8000), (0xDF00, 0xDF10)])
+        super().__init__(memory, [(0xF0, 0x100), (0x100, 0x200), (0x6000, 0x8000), (0xDF00, 0xDF10), (JOB + 8, JOB + 11)])  # JOB DATA: rewritten by Skip segments
         self.reu = reu
         self.dmas = 0
 
@@ -73,7 +73,9 @@ def reference(ram, reu, dst, y, top, bot, data, segs):
         line = b0 | (b1 & 1) << 8
         if line >= bot:
             break
-        if b1 & 0x80:
+        if b1 & 0x40:
+            data = (data - (b2 | b3 << 8)) & 0xFFFFFF
+        elif b1 & 0x80:
             if line >= top:
                 a = dst + line_offset((y + line) & 0xFFFF)
                 ram[a] = ram[a] & b3 | b2
@@ -98,6 +100,9 @@ def random_case(rng):
             segs.append([line & 255, line >> 8 | 0x80, rng.randrange(256), rng.randrange(256)])
             line += 1
         else:
+            if segs and rng.random() < 0.3:
+                gap = rng.randint(8, 300)
+                segs.append([line & 255, line >> 8 | 0x40, gap & 255, gap >> 8])
             n = min(rng.randint(1, 70), h - line)
             segs.append([line & 255, line >> 8, n & 255, n >> 8])
             line += n
@@ -116,7 +121,7 @@ def main():
         c = random_case(rng)
         if c['top'] >= c['bot']:
             continue
-        data = rng.randrange(0x1000, 0xF0000)
+        data = rng.randrange(0x20000, 0xF0000)
         mem = bytearray(65536)
         mem[base:base + len(prg) - 2] = prg[2:]
         for a in range(0x6000, 0x8000):

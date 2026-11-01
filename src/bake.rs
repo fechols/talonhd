@@ -100,17 +100,9 @@ pub fn build_image(pano: &Panorama, frames: &[SpriteImage], border: u8) -> Resul
                 }
                 let segs: Vec<u8> = col.segments.iter().flatten().copied().collect();
                 let seg_addr = a.place(&segs)?;
-                // Only the lines covered by runs are ever fetched; store
-                // those and bias the address so `data + line` still works.
-                let line = |s: &[u8; 4]| s[0] as usize | ((s[1] & 1) as usize) << 8;
-                let runs: Vec<&[u8; 4]> = col.segments.iter().filter(|s| s[1] & format::SEG_MIX == 0).collect();
-                let data_addr = match runs.iter().map(|s| line(s)).min() {
-                    Some(first) => {
-                        let end = runs.iter().map(|s| line(s) + (s[2] as usize | (s[3] as usize) << 8)).max().unwrap();
-                        a.place(&col.data[first..end])?.wrapping_sub(first as u32)
-                    }
-                    None => 0,
-                };
+                // Only run bytes are stored (gaps are Skip segments); bias the
+                // address by the first run's line so `data + line` works.
+                let data_addr = if col.data.is_empty() { 0 } else { a.place(&col.data)?.wrapping_sub(col.first as u32) };
                 let entry = &mut a.image[e as usize..e as usize + 8];
                 entry[column::DATA..column::DATA + 3].copy_from_slice(&data_addr.to_le_bytes()[..3]);
                 entry[column::SEGS..column::SEGS + 3].copy_from_slice(&seg_addr.to_le_bytes()[..3]);
@@ -160,14 +152,7 @@ pub fn frame_bytes(img: &SpriteImage) -> usize {
         let enc = encode::encode_phase(img, p);
         n += enc.wb as usize * format::COLUMN_ENTRY as usize;
         for col in &enc.columns {
-            n += col.segments.len() * 4;
-            let runs = col.segments.iter().filter(|s| s[1] & format::SEG_MIX == 0);
-            let line = |s: &[u8; 4]| s[0] as usize | ((s[1] & 1) as usize) << 8;
-            let first = runs.clone().map(line).min();
-            if let Some(first) = first {
-                let end = runs.map(|s| line(s) + (s[2] as usize | (s[3] as usize) << 8)).max().unwrap();
-                n += end - first;
-            }
+            n += col.segments.len() * 4 + col.data.len();
         }
     }
     n

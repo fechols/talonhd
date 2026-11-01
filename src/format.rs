@@ -35,15 +35,19 @@
 //!
 //! Each column has a sorted segment list (4 bytes per segment):
 //!
-//! | byte | Run (bit 7 of b1 clear)   | Mix (bit 7 of b1 set)          |
-//! |------|---------------------------|--------------------------------|
-//! | b0   | line bits 0-7             | line bits 0-7                  |
-//! | b1   | line bit 8 (bit 0)        | line bit 8 (bit 0) + `$80`     |
-//! | b2   | run length lo             | sprite bits (already masked)   |
-//! | b3   | run length hi             | keep-mask for the destination  |
+//! | byte | Run (b1 bits 7,6 clear) | Mix (bit 7 set)              | Skip (bit 6 set)       |
+//! |------|-------------------------|------------------------------|------------------------|
+//! | b0   | line bits 0-7           | line bits 0-7                | line bits 0-7          |
+//! | b1   | line bit 8 (bit 0)      | line bit 8 + `$80`           | line bit 8 + `$40`     |
+//! | b2   | run length lo           | sprite bits (already masked) | gap lo                 |
+//! | b3   | run length hi           | keep-mask for the destination| gap hi                 |
 //!
 //! Runs cover fully opaque bytes (pure DMA); Mix entries cover bytes with
 //! both opaque and transparent pixels (CPU: `dst = dst & keep | bits`).
+//! A run's REU source is `DATA + line`. The column's data stores only run
+//! bytes: a Skip, placed just before the run that follows a gap, subtracts
+//! the gap's length from `DATA`, so gaps between runs (a sprite's holes, the
+//! space between a boss's legs) cost 4 bytes instead of their length.
 
 pub const MAGIC: [u8; 8] = *b"TALONHD1";
 pub const HEADER_LEN: u32 = 64;
@@ -116,10 +120,17 @@ pub mod column {
 }
 pub const SEGMENT_LEN: u16 = 4;
 pub const SEG_MIX: u8 = 0x80;
+pub const SEG_SKIP: u8 = 0x40;
+/// Gaps shorter than this are stored as data (a Skip costs 4 bytes).
+pub const MIN_SKIP: usize = 8;
 
 #[inline(always)]
 pub fn le16(b: &[u8], at: usize) -> u16 {
     b[at] as u16 | (b[at + 1] as u16) << 8
+}
+#[inline(always)]
+pub fn le32(b: &[u8], at: usize) -> u32 {
+    le24(b, at) | (b[at + 3] as u32) << 24
 }
 #[inline(always)]
 pub fn le24(b: &[u8], at: usize) -> u32 {

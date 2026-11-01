@@ -10,6 +10,7 @@
 ;   +11 COUNT  segments in SEG_BUF
 ; SEG_BUF: 4-byte segments sorted by line (see talonhd::format).
 ;
+; Skip segments (b1 bit 6) subtract a gap from DATA (rewriting the JOB block).
 ; Opaque runs are clamped to [TOP, BOT) and copied as a chain of DMAs split
 ; at cell-row boundaries; the REU source address auto-increments between
 ; links, so each link only rewrites the C64 address and length. Mixed bytes
@@ -79,8 +80,23 @@ next_segment:
     bcc 3f
     rts
 3:  bit zp_kind
-    bpl run_segment
+    bpl 9f
     jmp mix         ; out of branch range
+9:  bvc run_segment
+    ; --- skip: DATA -= gap (b2 | b3 << 8); the gap's bytes are not stored ---
+    iny
+    sec
+    lda J_DATA
+    sbc (zp_segp),y
+    sta J_DATA
+    iny
+    lda J_DATA+1
+    sbc (zp_segp),y
+    sta J_DATA+1
+    lda J_DATA+2
+    sbc #0
+    sta J_DATA+2
+    jmp advance
 run_segment:
 
     ; --- opaque run: e = min(line + len, BOT), s = max(line, TOP) ---

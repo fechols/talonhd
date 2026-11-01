@@ -87,10 +87,16 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
 - **Models** (`src/mesh.rs`): `.mesh` text files from `tools/model_prep.py` (Ludo GLB → paint classes by
   normalized luminance + chroma → QEM decimation to the bible's triangle count → model space, x right, y nose,
   z up, hires px). Materials carry roles and an albedo from their paint.
-- **Tech scene** (`src/demo.rs`, shared, integer-only; `src/models.rs`, host): S1 palette; the Ludo TALON
-  (`assets/models/hd.ship.talon.mesh`) as the player's ship when present; procedural stand-ins (not game content)
-  for the 512×512 flying fortress, the drones and the panorama.
-- **Next:** verify the REU checksum at boot (a stale image was once accepted), then the Ludo GANTRY QUEEN and the
-  S1 roster, then the TALON simulation.
-- **Hardware quirk:** the first `c64u.py run` after a config change or a previous run sometimes leaves the machine
-  on garbage (status block full of `$55`). Run again, then `upload-reu`.
+- **Hand models** (`src/hand.rs`): geometry the art director builds when a Ludo model reads badly from straight
+  above (bible `generator = "hand"`); `cargo run --release -- hand-models` writes their `.mesh` files. The GANTRY
+  QUEEN is one.
+- **Sprite format:** column segments are Run, Mix or Skip (`SEG_SKIP`: subtract a gap from DATA, so holes cost no
+  REU bytes). The Rust `draw_column`, `asm/blit.S` and `tools/test_blit.py` change together.
+- **Tech scene** (`src/demo.rs`, shared, integer-only; `src/models.rs`, host): S1 palette; the Ludo TALON and the
+  hand-built GANTRY QUEEN (`assets/models/*.mesh`) when present, 49 roll frames, fine sine sway; procedural
+  stand-ins (not game content) for the drones, the panorama and, as a fallback, the boss.
+- **Boot:** the PRG erases the REU magic, then waits for magic + whole-image checksum, so `run` then `upload-reu`
+  always starts on the complete new image.
+- **Next:** the rest of the S1 roster from Ludo (WASP, GANNET, SKIFF, PILLBOX, HATCH, CRAWLER, KEELBREAKER),
+  the GANTRY QUEEN's separate legs/arms parts, then the TALON simulation.
+- **Hardware quirk:** `c64u.py run` right after `config` can reset the machine before the PRG loads; run again.
