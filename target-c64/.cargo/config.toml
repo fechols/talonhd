@@ -1,5 +1,10 @@
 [build]
 target = "mos-c64-none"
+# REU code paging (src/paging.rs): code must stay where link.ld puts it. Function merging folds identical
+# functions across modules (boss::aim, midboss::aim, midboss::turret_aim became one copy in the BOSS phase,
+# called from resident code while the window held another phase), and jump tables can land in resident
+# rodata pointing into the window. tools/check_phases.py audits the result.
+rustflags = ["-Zmerge-functions=disabled", "-Zno-jump-tables"]
 
 [unstable]
 build-std = ["core"]

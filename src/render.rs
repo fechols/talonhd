@@ -92,6 +92,7 @@ fn poke16<H: Hw + ?Sized>(hw: &mut H, addr: u16, value: u16) {
 }
 
 /// Read and validate the image header at REU 0.
+#[inline(never)]
 pub fn read_image<H: Hw + ?Sized>(hw: &mut H) -> Option<Image> {
     hw::init(hw);
     let h: [u8; 48] = record(hw, 0);
@@ -114,6 +115,7 @@ pub fn read_image<H: Hw + ?Sized>(hw: &mut H) -> Option<Image> {
 /// Erase the image magic in the REU. The PRG does this at boot, so an image
 /// left over from an earlier upload can't be mistaken for the one about to
 /// arrive (the device uploads after starting the PRG).
+#[inline(never)]
 pub fn invalidate_image<H: Hw + ?Sized>(hw: &mut H) {
     hw::init(hw);
     hw.fill(layout::RECORD, 8, 0);
@@ -123,6 +125,7 @@ pub fn invalidate_image<H: Hw + ?Sized>(hw: &mut H) {
 /// True when the whole image has arrived: the additive checksum over
 /// `HEADER_LEN..size` matches the header. Reads through `SEG_BUF` in
 /// `MAX_DMA` chunks.
+#[inline(never)]
 pub fn verify_image<H: Hw + ?Sized>(hw: &mut H, img: &Image) -> bool {
     if img.size <= format::HEADER_LEN || img.size > format::REU_SIZE {
         return false;
@@ -153,8 +156,8 @@ pub fn set_palette<H: Hw + ?Sized>(hw: &mut H, pal: Palette) {
 
 /// Copy the HUD's static sprite blocks into both VIC banks and set up the 8
 /// sprites (hires, unexpanded, in front, green). Call once at boot.
+/// On the C64 these boot-only functions are the `BOOT` paged phase (`crate::paging`).
 #[inline(never)]
-#[cfg_attr(target_arch = "mos", unsafe(link_section = ".hitext"))]
 pub fn hud_init<H: Hw + ?Sized>(hw: &mut H, img: &Image) {
     for base in layout::HUD_BLOCK_BASE {
         hw::fetch(hw, img.hud, base, format::HUD_BLOCKS * hud::BLOCK as u16);

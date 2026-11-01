@@ -199,7 +199,9 @@ pub fn crawler() -> ModelFile {
 /// separate part), crystal grown through the deck seams. Rolls gently in the swell.
 pub fn keelbreaker() -> ModelFile {
     let mut m = Mesh::new(vec![
-        hull(),
+        // A ground-level target the TALON flies over: the deck is one step down (void and dark only), so
+        // the light TALON always reads on top of it; light only on the bridge.
+        Material::lit(&[VOID, DARK], 0.75, 1),
         hull_dark(),
         crystal(),
         Material::lit(&[VOID, DARK, LIGHT], 0.55, 1),

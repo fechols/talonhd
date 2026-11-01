@@ -22,7 +22,11 @@ pub const PHASE_SLOT: u32 = 0x1000;
 pub const BOSS: u8 = 0;
 /// The attract mode's autopilot (`sim::replay::autopilot`), paged only while nobody is playing.
 pub const ATTRACT: u8 = 1;
-pub const PHASES: u8 = 2;
+/// The KEELBREAKER's fight logic (`midboss::Midboss::step` and its helpers).
+pub const MIDBOSS: u8 = 2;
+/// Boot-only code (`render::hud_init`, the REU image checks): paged once at startup.
+pub const BOOT: u8 = 3;
+pub const PHASES: u8 = 4;
 
 #[cfg(target_arch = "mos")]
 unsafe extern "C" {

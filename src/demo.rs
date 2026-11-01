@@ -33,7 +33,12 @@ pub const SPARK_FRAME: u16 = BURST_FRAME + BURST_FRAMES;
 /// silhouette outward, 8 steps per loop.
 pub const SHIELD_STEPS: u16 = 8;
 pub const SHIELD_FRAME: u16 = SPARK_FRAME + SPARK_FRAMES;
-pub const FRAMES: u16 = SHIELD_FRAME + PLAYER_BANKS * SHIELD_STEPS;
+/// The KEELBREAKER: hull at 5 roll samples, then its turret at 16 headings (`crate::midboss`).
+pub const KEEL_ROLLS: u16 = 5;
+pub const KEEL_FRAME: u16 = SHIELD_FRAME + PLAYER_BANKS * SHIELD_STEPS;
+pub const TURRET_YAWS: u16 = 16;
+pub const TURRET_FRAME: u16 = KEEL_FRAME + KEEL_ROLLS;
+pub const FRAMES: u16 = TURRET_FRAME + TURRET_YAWS;
 
 pub const BOSS_SIZE: u16 = 512;
 /// Screen line of the boss canvas centre: it hovers at the top, mostly above the screen.
@@ -65,6 +70,10 @@ pub const BURST_W: u16 = 24;
 pub const BURST_H: u16 = 44;
 pub const SPARK_W: u16 = 6;
 pub const SPARK_H: u16 = 10;
+pub const KEEL_W: u16 = 32;
+pub const KEEL_H: u16 = 256;
+pub const TURRET_W: u16 = 16;
+pub const TURRET_H: u16 = 32;
 pub const SHIELD_W: u16 = 48;
 pub const SHIELD_H: u16 = 88;
 

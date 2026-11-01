@@ -110,6 +110,8 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         ("gannet", demo::GANNET_FRAME, 2 * demo::GANNET_PITCHES),
         ("shots", demo::PAIR_FRAME, demo::SHIELD_FRAME - demo::PAIR_FRAME),
         ("shield", demo::SHIELD_FRAME, demo::PLAYER_BANKS * demo::SHIELD_STEPS),
+        ("keel", demo::KEEL_FRAME, demo::KEEL_ROLLS),
+        ("turret", demo::TURRET_FRAME, demo::TURRET_YAWS),
     ];
     let mut total = pano.rows as usize * 320;
     println!("panorama: {} cell rows, {} bytes", pano.rows, total);
@@ -135,14 +137,17 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
     // phase 2 if the autopilot gets there.
     let mut ticks = vec![0u32, 1, 2, 3, 150, 450, 900, 1700, 3300, 3420, 5000, 7000];
     let mut probe = game::Game::new();
-    let (mut shake, mut fight, mut phase2) = (None, None, None);
-    while probe.ticks < 40_000 && (shake.is_none() || fight.is_none()) {
+    let (mut shake, mut fight, mut phase2, mut keel) = (None, None, None, None);
+    while probe.ticks < 40_000 && (shake.is_none() || keel.is_none()) {
         let input = talonhd::sim::replay::autopilot(&probe.world);
         probe.step(input);
         if shake.is_none() && probe.pilot.since_hit == 3 {
             // The hit's first frames: +12 px (two whole columns right), then -8 (one column left).
             shake = Some(probe.ticks);
             ticks.extend([probe.ticks - 3, probe.ticks - 1]);
+        }
+        if probe.midboss.state == talonhd::midboss::PHASE1 && keel.is_none() {
+            keel = Some(probe.ticks + 300);
         }
         if probe.boss.state == talonhd::boss::PHASE1 && fight.is_none() {
             fight = Some(probe.ticks + 200);
@@ -151,9 +156,9 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
             phase2 = Some(probe.ticks + 30);
         }
     }
-    ticks.extend([shake, fight, phase2].into_iter().flatten());
+    ticks.extend([shake, fight, phase2, keel].into_iter().flatten());
     ticks.sort();
-    println!("self-check ticks {ticks:?} (shake {shake:?}, fight {fight:?}, phase 2 {phase2:?})");
+    println!("self-check ticks {ticks:?} (shake {shake:?}, keelbreaker {keel:?}, queen {fight:?}, phase 2 {phase2:?})");
     for t in ticks {
         while g.ticks < t {
             let input = talonhd::sim::replay::autopilot(&g.world);

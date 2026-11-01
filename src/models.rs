@@ -216,6 +216,13 @@ pub fn demo_frames() -> Vec<SpriteImage> {
     out.extend(game_frames());
     let ships: Vec<SpriteImage> = out[demo::PLAYER_FRAME as usize..(demo::PLAYER_FRAME + demo::PLAYER_BANKS) as usize].to_vec();
     out.extend(shield_frames(&ships));
+    // The KEELBREAKER (hand-built): hull rolls, turret headings.
+    let hull = crate::hand::keelbreaker().render_all();
+    assert_eq!(hull.len(), demo::KEEL_ROLLS as usize);
+    out.extend(hull);
+    let turret = crate::hand::keelbreaker_turret().render_all();
+    assert_eq!(turret.len(), demo::TURRET_YAWS as usize);
+    out.extend(turret);
     assert_eq!(out.len(), demo::FRAMES as usize);
     out
 }

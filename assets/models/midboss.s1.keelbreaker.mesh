@@ -2,7 +2,7 @@ TMESH1
 name midboss.s1.keelbreaker
 canvas 32 256
 orient roll=5 roll_max_deg=8
-material m0 0 2 0.60 void dark light
+material m0 0 1 0.75 void dark
 material m1 0 1 0.85 void dark
 material m2 0 0 1.00 dark hot
 material m3 0 1 0.55 void dark light

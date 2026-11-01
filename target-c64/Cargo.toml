@@ -17,6 +17,8 @@ bench = false
 default = []
 # Use the Rust reference column kernel instead of asm/blit.S (A/B testing).
 rust-columns = []
+# Debug: the attract game starts at stage line `START_LINE` (e.g. just before a midboss) to bisect faults.
+start-keel = []
 # Show render time as a border color bar.
 raster-bars = []
 # Time sprite setup / column overhead / column kernel into the status block

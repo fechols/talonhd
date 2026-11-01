@@ -32,6 +32,8 @@ MEMORY {
      * character ROM there, the CPU RAM), and paged in from the REU when it is needed. */
     ph_boss (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
     ph_attract (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
+    ph_midboss (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
+    ph_boot (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
 }
 
 /* Sections are matched by name before commodore.ld's catch-all .text, first match wins: the attributed
@@ -44,8 +46,13 @@ SECTIONS {
         *(.text._ZN7talonhd4game9hud_state* .text._ZN7talonhd4game4view* .text._ZN7talonhd4game5shake* .text._ZN7talonhd4game7palette*)
         *(.text._ZN7talonhd4boss4Boss7sprites* .text._ZN7talonhd4boss4Boss7palette* .text._ZN7talonhd4boss9placement*)
     } >hiram AT>hiload
+    .phase.boot : {
+        *(.text._ZN7talonhd6render8hud_init* .text._ZN7talonhd6render10read_image* .text._ZN7talonhd6render12verify_image* .text._ZN7talonhd6render16invalidate_image*)
+    } >ph_boot AT>hiload
     .lowtext : {
         *(.text._ZN7talonhd6render*)
+        *(.text._ZN7talonhd7midboss7Midboss7sprites* .text._ZN7talonhd7midboss7Midboss6active*)
+        *(.text._ZN7talonhd7midboss4roll* .text._ZN7talonhd7midboss4deck* .text._ZN7talonhd7midboss10turret_yaw*)
     } >lowram AT>hiload
     .uptext : {
         *(.text._ZN7talonhd3sim6common*)
@@ -63,11 +70,19 @@ SECTIONS {
     .phase.attract : {
         *(.text._ZN7talonhd3sim6replay*)
     } >ph_attract AT>hiload
+    .phase.midboss : {
+        *(.text._ZN7talonhd7midboss*)
+        *(.rodata._ZN7talonhd7midboss*)
+    } >ph_midboss AT>hiload
 }
 __phase_boss_load_start = LOADADDR(.phase.boss);
 __phase_boss_size = SIZEOF(.phase.boss);
 __phase_attract_load_start = LOADADDR(.phase.attract);
 __phase_attract_size = SIZEOF(.phase.attract);
+__phase_midboss_load_start = LOADADDR(.phase.midboss);
+__phase_midboss_size = SIZEOF(.phase.midboss);
+__phase_boot_load_start = LOADADDR(.phase.boot);
+__phase_boot_size = SIZEOF(.phase.boot);
 __hitext_start = ADDR(.hitext);
 __hitext_load_start = LOADADDR(.hitext);
 __hitext_pages = (SIZEOF(.hitext) + 255) / 256;

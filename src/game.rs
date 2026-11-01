@@ -7,6 +7,7 @@
 //! replays the C64's attract mode to any tick and renders the identical frame.
 
 use crate::boss::Boss;
+use crate::midboss::Midboss;
 use crate::demo::{self, *};
 use crate::render::Palette;
 use crate::hud;
@@ -22,7 +23,9 @@ pub const OX: i16 = 4;
 pub const OY: i16 = 8;
 
 /// Every sprite a frame can hold: the boss, the pools of the sim and the TALON.
-pub const INSTANCES: usize = QUEEN_SPRITES + GANNETS + WASPS + SPARKS + BURSTS + EBULLETS + PAIRS + 1;
+pub const INSTANCES: usize = KEEL_SPRITES + QUEEN_SPRITES + GANNETS + WASPS + SPARKS + BURSTS + EBULLETS + PAIRS + 1;
+/// The KEELBREAKER's hull, three turrets and two mines.
+const KEEL_SPRITES: usize = 6;
 
 /// Draw order (low first): boss parts and body (0, 1), then these.
 const Z_GANNET: i16 = 2;
@@ -53,11 +56,13 @@ pub struct Game {
     pub ticks: u32,
     /// The GANTRY QUEEN fight (`crate::boss`).
     pub boss: Boss,
+    /// The KEELBREAKER fight (`crate::midboss`).
+    pub midboss: Midboss,
 }
 
 impl Game {
     pub const fn new() -> Game {
-        Game { world: World::new(), pilot: Pilot { bank: 0, deaths: 0, since_hit: 255 }, ticks: 0, boss: Boss { state: 0, hp: [0; 4], core: 0, broken: 0, turn: 0, pat: 0, step: 0, timer: 0, sink: 0 } }
+        Game { world: World::new(), pilot: Pilot { bank: 0, deaths: 0, since_hit: 255 }, ticks: 0, boss: Boss { state: 0, hp: [0; 4], core: 0, broken: 0, turn: 0, pat: 0, step: 0, timer: 0, sink: 0 }, midboss: Midboss { state: 0, y: 0, hp: [0; 3], core: 0, clock: 0, turn: 0, pat: 0, step: 0, timer: 0, mines: [crate::midboss::Mine { t: 0, x: 0, y: 0, vx: 0, vy: 0 }; 2], yaw: [0; 3] } }
     }
 
     /// Power-on state in place (the C64 keeps `Game` zeroed in BSS and calls this at boot).
@@ -68,6 +73,7 @@ impl Game {
         self.pilot = Pilot { bank: 0, deaths: 0, since_hit: 255 };
         self.ticks = 0;
         self.boss = Boss::default();
+        self.midboss = Midboss::default();
     }
 
     /// One tick with this tick's input.
@@ -75,6 +81,16 @@ impl Game {
     pub fn step(&mut self, input: u8) {
         self.ticks = self.ticks.wrapping_add(1);
         self.world.step(input);
+        // The midboss and boss fight logic are paged phases (`crate::paging`), paged in only while active.
+        let at = lines(self);
+        if at < crate::midboss::ARRIVE {
+            if self.midboss.state != crate::midboss::ABSENT {
+                self.midboss = Midboss::default();
+            }
+        } else if self.midboss.state != crate::midboss::GONE {
+            crate::paging::page(crate::paging::MIDBOSS);
+            self.midboss.step(&mut self.world);
+        }
         // The fight logic is a paged phase (`crate::paging`): only paged in while she is around.
         if lines(self) < crate::boss::ARRIVE {
             if self.boss.state != crate::boss::ABSENT {
@@ -201,7 +217,8 @@ pub fn scene(g: &Game, out: &mut [Sprite; INSTANCES]) -> usize {
     let w = &g.world;
     let mut n = 0;
     let (px, py) = ((w.player.x >> 8) as i16, (w.player.y >> 8) as i16);
-    n += g.boss.sprites(w, &mut out[..QUEEN_SPRITES]);
+    n += g.midboss.sprites(w, &mut out[..KEEL_SPRITES]);
+    n += g.boss.sprites(w, &mut out[n..n + QUEEN_SPRITES]);
     for k in 0..GANNETS {
         let gn = &w.gannets[k];
         if gn.state != 0 {
@@ -334,6 +351,16 @@ mod tests {
             for s in &out[..n] {
                 assert!(s.frame < demo::FRAMES, "tick {t}: frame {}", s.frame);
             }
+        }
+        // The attract autopilot rarely survives to the apron (the midboss fight slows the stage): start a
+        // game near her line instead.
+        let mut g = Game::new();
+        g.world.track_base = 1_000_000;
+        g.world.scroll = (crate::boss::ARRIVE as u32 - 20) << 8;
+        for _ in 0..600 {
+            g.step(0);
+            let n = scene(&g, &mut out);
+            boss_seen |= out[..n].iter().any(|s| s.frame < demo::ARM_FRAME);
         }
         assert!(boss_seen, "the GANTRY QUEEN shows over the apron");
         assert!(most > 10);

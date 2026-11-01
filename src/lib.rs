@@ -16,6 +16,7 @@ pub mod format;
 pub mod game;
 pub mod hud;
 pub mod hw;
+pub mod midboss;
 pub mod paging;
 pub mod layout;
 pub mod render;

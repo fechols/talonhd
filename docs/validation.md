@@ -282,3 +282,22 @@ C64U: held frame tick 3556 (render 3.1 ms): **0 mismatched bytes**.
   two wave fronts follow the hull's silhouette outward from a dotted glow. A first circular version read as
   a peace sign and repeated every 2 steps; replaced. C64U: held frame tick 3797 (just respawned):
   **0 mismatched bytes**; image 5.65 MB (33.7 %).
+
+## 2026-11-01 — The KEELBREAKER; a paging fault found with a 6502 emulator
+
+- **Midboss** (`src/midboss.rs`, paged phase `MIDBOSS`): see CLAUDE.md. Host: `the_destroyer_can_be_sunk`
+  (scripted pilot: three turrets, then the bridge; the scroll slows during the fight).
+- **Readability**: the first hull had a light checker on its lit side and the white TALON vanished over it;
+  the deck is now void/dark only (light share 0 %).
+- **Code space**: boot-only code became the `BOOT` phase (+~1 KB resident).
+- **Fault**: the C64 froze when the KEELBREAKER arrived (tick 4799), PC model fine. Bisected on hardware
+  (`start-keel` feature), then reproduced in `tools/emu64.py` (the PRG in the 6502 interpreter with a REU,
+  `$01` banking and a raster): resident `game::scene` JSR'd to `$989e`, `boss::aim` in the BOSS phase, while
+  the window held MIDBOSS. LLVM's function merging had folded the identical `boss::aim`, `midboss::aim`
+  and `midboss::turret_aim`. Fix: `-Zmerge-functions=disabled -Zno-jump-tables` and
+  `tools/check_phases.py` (flags the old build's two violations, passes the new one); emu64: 160 flips
+  through the arrival, no fault.
+- **Cost**: turret aiming (48 directions, i32 dot products, every frame at render time) cost ~3 ms per
+  turret on the 6502 (render 15-18 ms). Now aimed in the step with 16-bit math, headings kept in the state:
+  render 7-10 ms during the fight.
+- C64U: held frames tick 5322 and 6033 (fight): **0 mismatched bytes**.

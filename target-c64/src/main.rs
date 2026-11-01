@@ -107,6 +107,10 @@ unsafe extern "C" {
     static __phase_boss_size: u8;
     static __phase_attract_load_start: u8;
     static __phase_attract_size: u8;
+    static __phase_midboss_load_start: u8;
+    static __phase_midboss_size: u8;
+    static __phase_boot_load_start: u8;
+    static __phase_boot_size: u8;
 }
 
 /// The phase in the window (0xFF: none).
@@ -115,10 +119,11 @@ static mut CURRENT_PHASE: u8 = 0xFF;
 /// Phase `p`'s load image address and length in the PRG.
 fn phase_image(p: u8) -> (u16, u16) {
     unsafe {
-        if p == paging::BOSS {
-            (&raw const __phase_boss_load_start as u16, &raw const __phase_boss_size as u16)
-        } else {
-            (&raw const __phase_attract_load_start as u16, &raw const __phase_attract_size as u16)
+        match p {
+            paging::BOSS => (&raw const __phase_boss_load_start as u16, &raw const __phase_boss_size as u16),
+            paging::ATTRACT => (&raw const __phase_attract_load_start as u16, &raw const __phase_attract_size as u16),
+            paging::MIDBOSS => (&raw const __phase_midboss_load_start as u16, &raw const __phase_midboss_size as u16),
+            _ => (&raw const __phase_boot_load_start as u16, &raw const __phase_boot_size as u16),
         }
     }
 }
@@ -183,6 +188,8 @@ fn status_poke16(c: &mut C64, offset: u16, value: u16) {
 pub extern "C" fn main() -> i16 {
     let c = &mut C64;
     stash_phases(c);
+    // Boot-only code (image checks, HUD setup) runs from the paging window.
+    paging::page(paging::BOOT);
     // 64 MHz with badlines off (C64U turbo registers); harmless elsewhere.
     c.poke(0xD031, 0x8F);
     c.poke(0xD011, 0x0B); // blank while setting up
@@ -224,6 +231,11 @@ pub extern "C" fn main() -> i16 {
     #[allow(static_mut_refs)]
     let g = unsafe { &mut GAME };
     g.reset();
+    #[cfg(feature = "start-keel")]
+    {
+        g.world.scroll = (talonhd::midboss::ARRIVE as u32 - 20) << 8;
+        g.world.track_base = 1_000_000;
+    }
     #[allow(static_mut_refs)]
     let sprites = unsafe { &mut SPRITES };
     render::hud_update(c, &game::hud_state(g));

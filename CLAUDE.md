@@ -26,6 +26,10 @@ Claude is also the **art director**: proposes and defends the look; the user app
 - **Rust:** edition 2024, zero third-party Rust dependencies; the shared library is `no_std` without `host`.
 - **C64 Ultimate:** mutating MCP calls and device runs need the user's go-ahead in the current session. Never save
   config to flash.
+- **No sprite flicker, ever** (user, 2026-11-01: "we don't flicker in 2026 ... let's pretend we're 16-bit"). No
+  blinking sprites (invincibility, pickups, warnings), no alternating-frame transparency, no multiplexing that
+  drops or alternates sprites, no HUD races. Color shifts, palette ramps, border flashes and screen shakes are
+  welcome: they are 16-bit polish, not 8-bit flicker (the energy wave, the border ramp, the camera shake).
 - Commit only when asked.
 
 ## Commands
@@ -58,6 +62,9 @@ C64 (rust-mos + llvm-mos in WSL `Ubuntu-24.04`, paths in `scripts/env.sh`):
 pwsh scripts/build-windows.ps1           # -> dist/talonhd.prg, dist/talonhd.elf
 python tools/test_blit.py                # asm column kernel vs reference in a 6502 interpreter
 python tools/test_hud_irq.py             # HUD raster IRQ vs the table contract
+python tools/check_phases.py             # REU paging audit: no resident call into the window but phase entries
+python tools/emu64.py --frames 160       # the real PRG in a 6502 + REU + $01 model: finds 6502-only faults
+pwsh scripts/build-windows.ps1 -Features start-keel   # debug: the attract game starts just before the midboss
 ```
 
 Always run `tools/test_blit.py` after touching `target-c64/asm/blit.S` (the assembler silently mis-encodes
@@ -110,8 +117,18 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   window `$9000-$9FFF`; the PRG carries the images, `main` stashes them first thing to REU `$FF0000` +
   4 KiB × id, `paging::page(id)` fetches one when it is not current (banking I/O in if the step had it
   out). Phases: `BOSS` (the fight's step logic; `Boss::sprites/palette` and `placement` stay resident),
-  `ATTRACT` (the autopilot). A phase may call resident code only. Link with `--no-check-sections` (phases
-  overlap by design); add a phase = a `ph_*` region, a `.phase.*` section, its symbols in `main.rs`.
+  `ATTRACT` (the autopilot), `MIDBOSS` (the KEELBREAKER's step), `BOOT` (`hud_init`, image checks). A phase
+  may call resident code only. Link with `--no-check-sections` (phases overlap by design); build with
+  `-Zmerge-functions=disabled -Zno-jump-tables` (`target-c64/.cargo/config.toml`): LLVM folded identical
+  `aim` functions into one copy in the BOSS phase and resident code called it while another phase was in
+  the window. After every C64 build run `tools/check_phases.py`; add a phase = a `ph_*` region, a
+  `.phase.*` section, its symbols in `main.rs`, its entry in `check_phases.py` `ENTRIES`. 6502 math: avoid
+  i32 multiplies in per-frame code (turret aiming cost 3 ms each until it went 16-bit, in the step).
+- **Midboss** (`src/midboss.rs`, paged): the KEELBREAKER leaves its berth at line 2400 and slides up the docks
+  channel; the scroll eases to 0.125 px/tick while it fights and it creeps up the screen (a line every 8
+  ticks) so its later turrets come into reach. Turrets 12 HP each (BROADSIDE, WAKE MINES), then the bridge
+  (36 HP, BRIDGE RING); sunk = 10,000 + 3 SPARKs; after 40 s the screen overtakes it. Hull 5 rolls, turret 16
+  headings (hand-built; its deck is void/dark only so the light TALON reads over it). `the_destroyer_can_be_sunk`.
 - **Invincibility** (user): no blinking; the TALON's 9 banks have 8-step energy-wave frames
   (`models::shield_frames`: waves that follow the hull's silhouette outward, `light` fading to `dark` dots).
 - **Hit feedback** (user): the HUD never flashes. The border ramps black, dark grey, light grey, white, light
@@ -139,8 +156,10 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   (2 KB of 6502). Keep the `/DISCARD/ .init.250` rule: it calls KERNAL CHROUT at `$FFD2`, which is our code now.
 - **Boot:** the PRG erases the REU magic, then waits for magic + whole-image checksum, so `run` then `upload-reu`
   always starts on the complete new image.
-- **Next:** the KEELBREAKER and runners for SKIFF, PILLBOX, HATCH, CRAWLER (each a paged phase), the promotion
-  sequence and the per-level REU load (it must not overwrite the phase bank `$FF0000`). Memory ideas from the
+- **Next:** runners for SKIFF, PILLBOX, HATCH, CRAWLER (each a paged phase), the promotion sequence and the
+  per-level REU load (it must not overwrite the phase bank `$FF0000`). User idea (2026-11-01): levels as
+  offline-rendered 3D geometry too, lit with the same per-level light as the sprites (a time of day per
+  stage). Memory ideas from the
   sibling repos still open: `opt-level "z"`, zero page `$90-$FF`, boot-only code in a retired section,
   borrow-and-restore overlays (impact), an IRQ static-frame audit (sueme64).
 - **Hardware quirk:** `c64u.py run` right after `config` can reset the machine before the PRG loads; run again.
