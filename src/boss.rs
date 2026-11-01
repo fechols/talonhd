@@ -76,27 +76,11 @@ pub const DIRS: [(i8, i8); 48] = {
     let mut k = 0;
     while k < 48 {
         let a = k as f64 * core::f64::consts::PI / 24.0;
-        t[k] = (round(80.0 * sin(a)), round(80.0 * sin(a + core::f64::consts::FRAC_PI_2)));
+        t[k] = (round(80.0 * demo::const_sin(a)), round(80.0 * demo::const_sin(a + core::f64::consts::FRAC_PI_2)));
         k += 1;
     }
     t
 };
-
-const fn sin(x: f64) -> f64 {
-    // Reduce to [-pi, pi], then a Taylor series to x^13 (error < 1e-6 there).
-    let tau = 2.0 * core::f64::consts::PI;
-    let mut x = x;
-    while x > core::f64::consts::PI {
-        x -= tau;
-    }
-    let (mut term, mut sum, mut n) = (x, x, 1);
-    while n < 7 {
-        term = -term * x * x / ((2 * n) as f64 * (2 * n + 1) as f64);
-        sum += term;
-        n += 1;
-    }
-    sum
-}
 
 const fn round(v: f64) -> i8 {
     (if v < 0.0 { v - 0.5 } else { v + 0.5 }) as i8

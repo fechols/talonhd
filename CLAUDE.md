@@ -108,9 +108,11 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   `World::spawn_ebullet`, scores through `add_score`. `the_fight_runs_to_the_end` plays it through.
 - **Hit feedback** (user): the HUD never flashes. The border ramps black, dark grey, light grey, white, light
   red, red, light red, light grey, dark grey, black (`hud::FLASH_RAMP`, 2 frames a step); the camera shakes
-  for 16 frames (`game::shake`: panorama window and sprites move vertically, XSCROLL horizontally in
-  38-column mode, `layout::XSCROLL_REST` 4), and the HUD sprites move the opposite way (`hud::xs`,
-  `hud::build`'s Ys and IRQ lines).
+  for 24 frames (`game::SHAKE_X/Y`: per axis two sines of different frequency and amplitude under a
+  decaying envelope, compile-time tables, up to ±12 px / ±6 lines). Vertically the panorama window and
+  sprites move; sideways whole 8-px columns shift the background copy (`Scroll::col`, wrapped-in columns
+  blanked) and the sprites, and XSCROLL (38-column mode, rest 4) does the rest. The HUD sprites move the
+  opposite way (`hud::xs`, `hud::build`'s Ys and IRQ lines).
 - **Frames and panorama:** `demo.rs` is the frame directory (boss body, arms, legs, WASP yaws, TALON banks,
   GANNET pitches, shots, bursts, SPARKs) plus the boss's flight (`PART_XY0` + compile-time `PART_DX`; no trig
   on the C64). Her six parts have one frame per body bank sample (`hand::queen_part_frames`, rendered at bake

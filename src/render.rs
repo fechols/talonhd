@@ -232,13 +232,16 @@ pub struct Scroll {
     pub fine: u8,
     /// `$D016` XSCROLL (0-7 hires px): `layout::XSCROLL_REST` at rest; the camera shake moves it.
     pub xs: u8,
+    /// Whole 8-px columns the background is shifted right (camera shake beyond XSCROLL's reach); the
+    /// columns that wrap in at the edge are blanked to code 00.
+    pub col: i8,
 }
 
 impl Scroll {
     pub fn new(img: &Image, scroll: u16) -> Scroll {
         let max = (img.bg_rows.max(layout::ROWS) - layout::ROWS) * 8;
         let s = scroll.min(max);
-        Scroll { coarse: s >> 3, fine: (s & 7) as u8, xs: layout::XSCROLL_REST }
+        Scroll { coarse: s >> 3, fine: (s & 7) as u8, xs: layout::XSCROLL_REST, col: 0 }
     }
     /// `$D016`: multicolor, 38 columns (the border hides the XSCROLL gap), XSCROLL.
     pub fn d016(self) -> u8 {
@@ -251,9 +254,20 @@ impl Scroll {
 }
 
 /// DMA the visible window of the panorama: 25 contiguous cell rows.
+/// With `scroll.col` the copy starts `8 * col` bytes earlier (one cell column per 8 bytes), so every
+/// cell row moves right by `col` columns; the columns that come from the neighbouring cell row are
+/// blanked (left edge for `col > 0`, right edge for `col < 0`).
 pub fn restore_background<H: Hw + ?Sized>(hw: &mut H, img: &Image, buf: Buffer, scroll: Scroll) {
     let src = img.background + scroll.coarse as u32 * layout::ROW_STRIDE as u32;
-    hw::fetch(hw, src, buf.bitmap, layout::BITMAP_BYTES);
+    let shift = 8 * scroll.col as i32;
+    hw::fetch(hw, src.wrapping_sub(shift as u32), buf.bitmap, layout::BITMAP_BYTES);
+    if shift != 0 {
+        let n = shift.unsigned_abs() as u16;
+        let edge = if shift > 0 { 0 } else { layout::ROW_STRIDE - n };
+        for r in 0..layout::ROWS {
+            hw.fill(buf.bitmap + r * layout::ROW_STRIDE + edge, n, 0);
+        }
+    }
 }
 
 /// Render a whole frame into `buf`. Sorts `sprites` in place. Sprites are in

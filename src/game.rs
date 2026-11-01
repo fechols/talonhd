@@ -113,22 +113,60 @@ fn lines(g: &Game) -> u16 {
     (g.world.scroll_lines() % PANO_PERIOD as u32) as u16
 }
 
-/// The camera shake after the TALON is hit: hires px right, lines down, decaying over 16 frames.
-const SHAKE_X: [i8; 16] = [-4, 4, -3, 3, -4, 2, -3, 2, -2, 1, -2, 1, -1, 1, 0, 0];
-const SHAKE_Y: [i8; 16] = [2, -2, 1, -2, 2, -1, 1, -1, 1, 0, -1, 0, 1, 0, 0, 0];
+/// The camera shake after the TALON is hit, per frame: on each axis two sines of different frequency
+/// and amplitude added together, under an envelope that decays to rest over `SHAKE_FRAMES`. Evaluated
+/// at compile time; the C64 only reads the two tables.
+pub const SHAKE_FRAMES: usize = 24;
+pub const SHAKE_MAX_X: i8 = 12;
+pub const SHAKE_MAX_Y: i8 = 6;
+const fn harmonic(t: usize, a1: f64, p1: f64, ph1: f64, a2: f64, p2: f64, ph2: f64, max: i8) -> i8 {
+    let tau = 2.0 * core::f64::consts::PI;
+    let u = 1.0 - t as f64 / SHAKE_FRAMES as f64;
+    let env = u * u;
+    let v = env * (a1 * demo::const_sin(tau * t as f64 / p1 + ph1) + a2 * demo::const_sin(tau * t as f64 / p2 + ph2));
+    let r = (if v < 0.0 { v - 0.5 } else { v + 0.5 }) as i32;
+    (if r > max as i32 { max as i32 } else if r < -(max as i32) { -(max as i32) } else { r }) as i8
+}
+const fn shake_table(x: bool) -> [i8; SHAKE_FRAMES] {
+    let mut out = [0i8; SHAKE_FRAMES];
+    let mut t = 0;
+    while t < SHAKE_FRAMES {
+        // x: 9 px with a 5.5-frame period plus 4 px with a 2.6-frame period;
+        // y: 4.5 lines every 6.5 frames plus 2 lines every 3.1.
+        out[t] = if x {
+            harmonic(t, 9.0, 5.5, 2.0, 4.0, 2.6, 1.0, SHAKE_MAX_X)
+        } else {
+            harmonic(t, 4.5, 6.5, 1.0, 2.0, 3.1, 0.3, SHAKE_MAX_Y)
+        };
+        t += 1;
+    }
+    out
+}
+pub const SHAKE_X: [i8; SHAKE_FRAMES] = shake_table(true);
+pub const SHAKE_Y: [i8; SHAKE_FRAMES] = shake_table(false);
 
 /// This frame's camera shake (hires px right, lines down).
 pub fn shake(g: &Game) -> (i8, i8) {
     let t = g.pilot.since_hit as usize;
-    if t < 16 { (SHAKE_X[t], SHAKE_Y[t]) } else { (0, 0) }
+    if t < SHAKE_FRAMES { (SHAKE_X[t], SHAKE_Y[t]) } else { (0, 0) }
 }
 
-/// The view this frame: panorama window and XSCROLL, both moved by the shake (sprites follow in `scene`).
+/// The shake's sideways part split into whole 8-px columns (background copy and sprites) and the
+/// XSCROLL remainder (-4..=3 about rest).
+fn shake_cols(sx: i8) -> (i8, i8) {
+    let col = (sx as i16 + 4).div_euclid(8) as i8;
+    (col, sx - 8 * col)
+}
+
+/// The view this frame: panorama window, column shift and XSCROLL, moved by the shake (sprites follow
+/// in `scene`).
 pub fn view(g: &Game, img: &crate::render::Image) -> crate::render::Scroll {
     let (sx, sy) = shake(g);
     let line = (demo::scroll(lines(g)) as i16 - sy as i16).rem_euclid(PANO_PERIOD as i16) as u16;
     let mut v = crate::render::Scroll::new(img, line);
-    v.xs = (crate::layout::XSCROLL_REST as i8 + sx) as u8;
+    let (col, fine) = shake_cols(sx);
+    v.col = col;
+    v.xs = (crate::layout::XSCROLL_REST as i8 + fine) as u8;
     v
 }
 
@@ -217,10 +255,12 @@ pub fn scene(g: &Game, out: &mut [Sprite; INSTANCES]) -> usize {
             n += 1;
         }
     }
-    // The camera shake moves everything drawn with the panorama (XSCROLL does the sideways part).
-    let dy = shake(g).1 as i16;
-    if dy != 0 {
+    // The camera shake moves everything drawn with the panorama: whole columns here, the rest is XSCROLL.
+    let (sx, sy) = shake(g);
+    let (dx, dy) = (4 * shake_cols(sx).0 as i16, sy as i16);
+    if dx != 0 || dy != 0 {
         for s in out[..n].iter_mut() {
+            s.x += dx;
             s.y += dy;
         }
     }
@@ -283,6 +323,21 @@ mod tests {
         }
         assert!(boss_seen, "the GANTRY QUEEN shows over the apron");
         assert!(most > 10);
+    }
+
+    #[test]
+    fn the_shake_is_hard_then_settles() {
+        let peak_x = SHAKE_X.iter().map(|v| v.abs()).max().unwrap();
+        let peak_y = SHAKE_Y.iter().map(|v| v.abs()).max().unwrap();
+        assert!(peak_x >= 9 && peak_x <= SHAKE_MAX_X, "{SHAKE_X:?}");
+        assert!(peak_y >= 4 && peak_y <= SHAKE_MAX_Y, "{SHAKE_Y:?}");
+        assert!(SHAKE_X[SHAKE_FRAMES - 3..].iter().all(|v| v.abs() <= 1));
+        for sx in -SHAKE_MAX_X..=SHAKE_MAX_X {
+            let (col, fine) = shake_cols(sx);
+            assert_eq!(col as i16 * 8 + fine as i16, sx as i16);
+            assert!((-4..=3).contains(&fine));
+        }
+        println!("x {SHAKE_X:?}\ny {SHAKE_Y:?}");
     }
 
     #[test]

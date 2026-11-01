@@ -111,6 +111,26 @@ pub fn scroll(lines: u16) -> u16 {
     (2 * PANO_PERIOD - 200 - lines % PANO_PERIOD) % PANO_PERIOD
 }
 
+/// Sine for compile-time tables (no float code reaches the C64): reduce to [-pi, pi], then a Taylor
+/// series to x^13 (error < 1e-6 there).
+pub const fn const_sin(x: f64) -> f64 {
+    let pi = core::f64::consts::PI;
+    let mut x = x;
+    while x > pi {
+        x -= 2.0 * pi;
+    }
+    while x < -pi {
+        x += 2.0 * pi;
+    }
+    let (mut term, mut sum, mut n) = (x, x, 1);
+    while n < 7 {
+        term = -term * x * x / ((2 * n) as f64 * (2 * n + 1) as f64);
+        sum += term;
+        n += 1;
+    }
+    sum
+}
+
 /// Sine and cosine of `deg` (|deg| <= 30) in Q14, by Taylor series: exact to a part in 10^4.
 pub const fn sin_cos_deg(deg: i16) -> (i32, i32) {
     let a = deg as i32 * 286; // radians in Q14

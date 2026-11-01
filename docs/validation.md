@@ -257,3 +257,13 @@ at Y+22 (`hud::build`), still before the next row's Y compare at Y+24, and `MAX_
 of CPU stall) to keep that slack. Background restore 2.24 -> 2.47 ms (more DMA commands). After the fix,
 8 captures: HUD green pixels identical in all of them outside the two scrolling tapes (dark specks inside
 glyphs are the panorama showing through transparent sprite pixels).
+
+## 2026-11-01 — Harder, two-harmonic camera shake
+
+User: a harder shake, as two sines of different frequency and amplitude. `game::SHAKE_X/Y` are compile-time
+tables (24 frames): x = env·(9 sin(2πt/5.5 + 2) + 4 sin(2πt/2.6 + 1)), y = env·(4.5 sin(2πt/6.5 + 1) +
+2 sin(2πt/3.1 + 0.3)), env = (1 - t/24)², clamped to ±12 px / ±6 lines. x: 12, -1, -8, -2, -1, 7, 3, -4 ...
+Beyond XSCROLL's ±4 the background DMA starts 8 bytes per column earlier or later (`Scroll::col`), the
+wrapped-in edge columns are filled with code 00, and sprites move 4 multicolor px per column; the reference
+compositor models both. Bake self-check adds the shake's +12 (two columns) and -8 (one column) frames.
+C64U: held frame tick 3556 (render 3.1 ms): **0 mismatched bytes**.

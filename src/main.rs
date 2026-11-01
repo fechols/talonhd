@@ -139,7 +139,9 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         let input = talonhd::sim::replay::autopilot(&probe.world);
         probe.step(input);
         if shake.is_none() && probe.pilot.since_hit == 3 {
+            // The hit's first frames: +12 px (two whole columns right), then -8 (one column left).
             shake = Some(probe.ticks);
+            ticks.extend([probe.ticks - 3, probe.ticks - 1]);
         }
         if probe.boss.state == talonhd::boss::PHASE1 && fight.is_none() {
             fight = Some(probe.ticks + 200);

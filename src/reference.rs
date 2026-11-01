@@ -17,6 +17,18 @@ pub struct Expected {
 pub fn compose(pano: &Panorama, frames: &[SpriteImage], scroll: Scroll, sprites: &[Sprite]) -> Expected {
     let top = scroll.coarse as usize * 8;
     let mut codes = pano.codes[top * 160..(top + 200) * 160].to_vec();
+    // The camera shake's whole-column shift: content moves right 4 multicolor px per column, and the
+    // columns that wrap in are blanked.
+    let shift = 4 * scroll.col as i32;
+    if shift != 0 {
+        let src = codes.clone();
+        for y in 0..200 {
+            for x in 0..160i32 {
+                let from = x - shift;
+                codes[y * 160 + x as usize] = if (0..160).contains(&from) { src[y * 160 + from as usize] } else { 0 };
+            }
+        }
+    }
     let mut order: Vec<Sprite> = sprites.to_vec();
     order.sort_by_key(|s| s.z);
     for s in &order {
