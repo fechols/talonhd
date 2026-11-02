@@ -224,9 +224,11 @@ fn shoot(w: &mut World, x: i16, y: i16, k: u8, boost: u8) {
     w.spawn_ebullet(B_ROUND, x + (vx >> 2) as i16, y + (vy >> 2) as i16, vx + bx, vy + by);
 }
 
+/// A burst at playfield (`x`, `y`), reusing the slot with least time left (as TALON's own bursts).
+/// Resident (`.hitext`): the GANTRY QUEEN's phase uses it too.
 #[inline(never)]
 #[cfg_attr(target_arch = "mos", unsafe(link_section = ".hitext.ground_burst"))]
-fn burst(w: &mut World, x: i16, y: i16) {
+pub(crate) fn burst(w: &mut World, x: i16, y: i16) {
     let mut best = 0;
     for i in 1..BURSTS {
         if w.bursts[i].t < w.bursts[best].t {

@@ -422,3 +422,20 @@ a segment-list DMA and a job per column). Small sprites (bullets) should not tou
 - ACE: fires only with an enemy on screen; keeps clear of live HATCHes (one launched a WASP under the parked
   ship); predicts WASPs along their turn programs (two later-lap deaths were curving WASPs). 40,000 ticks: 0
   deaths, 184,300 points.
+
+## QUEEN fight: wreck, music by cost, kernel tuning (2026-11-01)
+
+- C64U full-stage log before these changes (ACE fire rule, HATCH avoidance): frames over 16.7 ms flight 0.2%,
+  KEELBREAKER 5.1%, QUEEN 4.4% (from 11.6%), wreck drift 7.5%. Worst frames were music catch-up spikes
+  (4.1-4.3 ms after skipped services), so music now decodes by cost every frame instead (heavy frames 200
+  samples, light 400, full budget below an 8,192-sample lead; `the_ring_stays_ahead` covers a 2,500-frame
+  heavy stretch: lead holds at ~8,160, no underruns). Not yet re-measured on hardware (the C64U was needed
+  by another session).
+- The QUEEN's wreck (WRECK state, 3 banks x 4 phases, 208 KB) and 16-bit octant aim
+  (`aim_finds_the_nearest_direction`: 98% exact vs 71% for the old dot product); BOSS phase back under 4 KiB
+  by sharing the ground units' resident `burst` and dropping a modulo and multiplies from `dying`.
+- `tools/profile_frame.py` (the frame's sprites through `draw_sprite_asm` in the interpreter, priced with the
+  bench unit costs) matches the hardware within ~8% (7.6 vs 8.2 ms at tick 10,765). Kernel: the run copy is
+  an unrolled 8-way block entered by length (Duff), one index across a run's cell rows, and a band's visible
+  range fetched in one go when it fits: QUEEN frames 7.80 -> 7.24 ms (t 10,252) and 7.02 -> 6.55 ms (t 10,792).
+  Two out-of-range branches (the assembler mis-encodes them silently) were caught by `test_blit.py`.

@@ -161,6 +161,12 @@ pub fn demo_frames_with_assets() -> Vec<SpriteImage> {
             frames[demo::BOSS_FRAME as usize + i] = f;
         }
     }
+    // Her wreck: the body banked left, level and right, the Lattice dead, scorched and holed.
+    if let Ok(m) = crate::mesh::load(std::path::Path::new(QUEEN_MESH)) {
+        for (k, f) in crate::hand::queen_wreck_frames(&m).into_iter().enumerate() {
+            frames[demo::QUEEN_WRECK_FRAME as usize + k] = f;
+        }
+    }
     // Her arms and legs, when the body is hers: posed per bank sample, rendered from `hand.rs`.
     if std::path::Path::new(QUEEN_MESH).exists() {
         for (k, f) in crate::hand::queen_part_frames().into_iter().enumerate() {
@@ -246,6 +252,10 @@ pub fn ground_frames() -> Vec<SpriteImage> {
     }
     out.extend(hand::wreck(20.0).render_all());
     out.extend(hand::wreck(24.0).render_all());
+    // The GANTRY QUEEN's wreck frames hold their slots (rendered from her mesh when it is present).
+    for _ in 0..demo::QUEEN_WRECKS {
+        out.push(SpriteImage::new(4, 1));
+    }
     out
 }
 

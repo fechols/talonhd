@@ -35,7 +35,11 @@ struct C64;
 
 /// Profiling (feature `profile`): time charged per [`Hw::mark`] slot, and
 /// the last mark time.
+// Written before every read: no zeroed BSS needed; lives with the static frames (`.noinit`, $CB60).
+#[unsafe(link_section = ".noinit")]
 static mut PROFILE: [u16; 3] = [0; 3];
+// Written before every read: no zeroed BSS needed; lives with the static frames (`.noinit`, $CB60).
+#[unsafe(link_section = ".noinit")]
 static mut LAST_MARK: u16 = 0;
 
 /// The game and this frame's sprites live in BSS (the soft stack under $D000 is small); the game is
@@ -125,6 +129,8 @@ unsafe extern "C" {
 static mut CURRENT_PHASE: u8 = 0xFF;
 /// Each phase's length (BOOT's from the PRG, the rest from the level image's header).
 /// Each phase's length in 256-byte pages (`format::header::PHASE_LENS`).
+// Written before every read: no zeroed BSS needed; lives with the static frames (`.noinit`, $CB60).
+#[unsafe(link_section = ".noinit")]
 static mut PHASE_LEN: [u8; paging::PHASES as usize] = [0; paging::PHASES as usize];
 /// The stamp of the phases this PRG was built with: `scripts/build-target.sh` patches it in after the
 /// link (`tools/phases.py`); the level image's header must carry the same (`install_phases`).
@@ -171,6 +177,9 @@ pub extern "C" fn talonhd_page(p: u8) {
     talonhd::hw::fetch(c, paging::REU_PHASES + p as u32 * paging::PHASE_SLOT, paging::WINDOW, len);
     c.poke(0x0001, port);
 }
+
+/// Render time (us) above which a frame counts as heavy for the music (`audio::service`).
+const AUDIO_HEAVY_US: u16 = 7000;
 
 /// The sprite job block `draw_sprite_asm` reads (`asm/blit.S` `SP_*`).
 const SPRITE_JOB: u16 = 0xCAA0;
@@ -399,11 +408,13 @@ pub extern "C" fn main() -> i16 {
         render::present(c, buf, scroll);
         flipped_at = micros(c);
         render::hud_update(c, &game::hud_state(g));
-        // Keep the music ring ahead of the sampler (I/O is in; the AUDIO phase is paged every frame).
+        // Keep the music ring ahead of the sampler (I/O is in). Music is not game state, so its cost
+        // follows the frame's: a frame whose render took over AUDIO_HEAVY_US decodes a little less than
+        // it plays, light frames make it up (`audio::service`); the ring's ~1.9 s lead covers the gap.
         #[cfg(feature = "timing")]
         let t_audio = micros(c);
         paging::page(paging::AUDIO);
-        talonhd::audio::service(c, player);
+        talonhd::audio::service(c, player, took < AUDIO_HEAVY_US);
         #[cfg(feature = "timing")]
         {
             let d = micros(c).wrapping_sub(t_audio);

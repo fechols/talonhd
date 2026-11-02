@@ -143,6 +143,7 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         ("crawler", demo::CRAWLER_FRAME, 2 * demo::UNIT_YAWS),
         ("wreck", demo::WRECK_FRAME, 1),
         ("hulk", demo::WRECK_FRAME + 1, 1),
+        ("qwreck", demo::QUEEN_WRECK_FRAME, demo::QUEEN_WRECKS),
     ];
     let mut total = pano.rows as usize * 320 * panos.len();
     println!("panorama: {} cell rows, {} bytes x {} frames", pano.rows, pano.rows as usize * 320, panos.len());
@@ -192,7 +193,7 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
     let mut probe = game::Game::new();
     let mut probe_mind = talonhd::ace::Mind::new();
     let (mut shake, mut fight, mut phase2, mut keel) = (None, None, None, None);
-    while probe.ticks < 40_000 && (shake.is_none() || keel.is_none()) {
+    while probe.ticks < 40_000 && (shake.is_none() || keel.is_none() || fight.is_none() || phase2.is_none()) {
         let input = talonhd::ace::fly(&mut probe, &mut probe_mind);
         probe.step(input);
         if shake.is_none() && probe.pilot.since_hit == 3 {

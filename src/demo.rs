@@ -47,7 +47,15 @@ pub const HATCH_POSES: u16 = 6;
 pub const HATCH_FRAME: u16 = PILLBOX_FRAME + 2 * UNIT_YAWS;
 pub const CRAWLER_FRAME: u16 = HATCH_FRAME + HATCH_POSES;
 pub const WRECK_FRAME: u16 = CRAWLER_FRAME + 2 * UNIT_YAWS;
-pub const FRAMES: u16 = WRECK_FRAME + 2;
+/// The GANTRY QUEEN's wreck (user: "show it in a damaged state and have it scroll offscreen smoothly"):
+/// her body banked left, level and right (`QUEEN_WRECK_BANKS`), the Lattice dead, the hull scorched and
+/// holed; 4 phases, as it glides to the screen's centre while it drifts down.
+pub const QUEEN_WRECK_FRAME: u16 = WRECK_FRAME + 2;
+pub const QUEEN_WRECKS: u16 = 3;
+pub const QUEEN_WRECK_BANKS: [u16; 3] = [8, 24, 40];
+/// Body sprite x of the wreck centred on the screen (canvas centre at multicolor x 80).
+pub const QUEEN_WRECK_X: i16 = 80 - BOSS_SIZE as i16 / 2;
+pub const FRAMES: u16 = QUEEN_WRECK_FRAME + QUEEN_WRECKS;
 
 pub const BOSS_SIZE: u16 = 512;
 /// Screen line of the boss canvas centre: it hovers at the top, mostly above the screen.

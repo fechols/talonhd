@@ -67,7 +67,7 @@ pub struct Game {
 
 impl Game {
     pub const fn new() -> Game {
-        Game { world: World::new(), pilot: Pilot { bank: 0, deaths: 0, since_hit: 255 }, ticks: 0, boss: Boss { state: 0, hp: [0; 4], core: 0, broken: 0, turn: 0, pat: 0, step: 0, timer: 0, sink: 0, aim: [0; 2] }, midboss: Midboss { state: 0, y: 0, hp: [0; 3], core: 0, clock: 0, turn: 0, pat: 0, step: 0, timer: 0, mines: [crate::midboss::Mine { t: 0, x: 0, y: 0, vx: 0, vy: 0 }; 2], yaw: [0; 3], aim: [0; 2] }, ground: Ground::new(), ace: crate::ace::Ace::new() }
+        Game { world: World::new(), pilot: Pilot { bank: 0, deaths: 0, since_hit: 255 }, ticks: 0, boss: Boss { state: 0, hp: [0; 4], core: 0, broken: 0, turn: 0, pat: 0, step: 0, timer: 0, sink: 0, aim: [0; 2], wreck_frame: 0, wreck_x: 0, wreck_y: 0 }, midboss: Midboss { state: 0, y: 0, hp: [0; 3], core: 0, clock: 0, turn: 0, pat: 0, step: 0, timer: 0, mines: [crate::midboss::Mine { t: 0, x: 0, y: 0, vx: 0, vy: 0 }; 2], yaw: [0; 3], aim: [0; 2] }, ground: Ground::new(), ace: crate::ace::Ace::new() }
     }
 
     /// Power-on state in place (the C64 keeps `Game` zeroed in BSS and calls this at boot).
@@ -104,9 +104,12 @@ impl Game {
                 self.boss = Boss::default();
             }
             self.world.boss_ceiling = false;
-        } else {
+        } else if self.boss.state != crate::boss::GONE {
             crate::paging::page(crate::paging::BOSS);
             self.boss.step(&mut self.world);
+        } else {
+            // She is gone until the next pass: no paging, no step.
+            self.world.boss_ceiling = false;
         }
         // The ground units' step is a paged phase too, paged in only while one is out or due.
         let at = lines(self);

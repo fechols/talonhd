@@ -125,8 +125,9 @@ run:
     cmp zp_ptr
     lda zp_from+1
     sbc zp_ptr+1
-    bcs run_done
-    ; rem = e - s (fits a byte: a run is at most 255 lines)
+    bcc 90f
+    jmp run_done
+90:
     sec
     lda zp_ptr
     sbc zp_from
@@ -154,6 +155,9 @@ run:
     inc zp_from+1
 1:
 
+    ; y indexes the run's bytes for the whole run; each cell row's bitmap pointer is biased by -y so
+    ; (zp_ptr),y lands on it while y keeps counting (no source pointer update per row).
+    ldy #0
 cell:
     ; n = min(8 - (sl & 7), rem)
     lda zp_sl
@@ -165,6 +169,8 @@ cell:
     bcc 5f
     lda zp_rem
 5:  sta zp_n
+    ; ptr = dst + line offset(sl) - y   (zp_line is free now: a scratch word)
+    sty zp_line
     ldx zp_sl
     clc
     lda zp_dst
@@ -173,29 +179,38 @@ cell:
     lda zp_dst+1
     adc line_hi,x
     sta zp_ptr+1
-    ldy #0
-6:  lda (zp_from),y
+    sec
+    lda zp_ptr
+    sbc zp_line
+    sta zp_ptr
+    bcs 6f
+    dec zp_ptr+1
+6:  ; copy n bytes: enter the unrolled 8 at 8 - n (Duff's device)
+    lda zp_n
+    asl a
+    tax
+    lda copy_entry,x
+    sta zp_line
+    lda copy_entry+1,x
+    sta zp_line+1
+    jmp (zp_line)
+copy8:
+    .rept 8
+    lda (zp_from),y
     sta (zp_ptr),y
     iny
-    cpy zp_n
-    bne 6b
-    ; from += n, sl += n, rem -= n
+    .endr
+copied:
+    ; sl += n, rem -= n
     clc
-    tya
-    adc zp_from
-    sta zp_from
-    bcc 7f
-    inc zp_from+1
-7:  clc
-    tya
-    adc zp_sl
+    lda zp_sl
+    adc zp_n
     sta zp_sl
     sec
     lda zp_rem
     sbc zp_n
     sta zp_rem
     bne cell
-
 run_done:
     ; src += 3 + len
     clc
@@ -266,6 +281,10 @@ next_column:
 2:  rts
 .size draw_cols_asm, .-draw_cols_asm
 
+; draw_cols_asm's unrolled copy: the entry for n bytes, n = 0..8 (each step is 5 bytes: lda (zp),y / sta (zp),y / iny).
+.section .rodata.copy_entry,"a",@progbits
+copy_entry:
+    .word copied, copy8 + 35, copy8 + 30, copy8 + 25, copy8 + 20, copy8 + 15, copy8 + 10, copy8 + 5, copy8
 ; draw_sprite_asm — one whole sprite. Same contract as the Rust reference `talonhd::render::draw_sprite`
 ; (the host model runs that; tools/test_blit.py runs both on the baked image).
 ;
@@ -781,7 +800,26 @@ chunk:
     sta SP_START
     lda OFFS+1,x
     sta SP_START+1
-    ldx SP_J
+    ; Fast path: the rest of the band fits the chunk (the usual case: 32 lines of 40 columns).
+    lda SP_NCOLS
+    asl a
+    tax
+    sec
+    lda OFFS,x
+    sbc SP_START
+    sta SP_T
+    lda OFFS+1,x
+    sbc SP_START+1
+    sta SP_T+1
+    lda #<CHUNK_LEN
+    cmp SP_T
+    lda #>CHUNK_LEN
+    sbc SP_T+1
+    bcc 14f
+    lda SP_NCOLS
+    sta SP_K
+    jmp 13f
+14: ldx SP_J
     inx
     stx SP_K
 12: lda SP_K

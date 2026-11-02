@@ -35,8 +35,10 @@ pub const RING_SAMPLES: u32 = 32_768;
 pub const GUARD: u32 = 2048;
 /// The right voice's lag: 10 ms at 16 kHz.
 pub const DELAY: u16 = 160;
-/// Samples decoded per [`service`] at most (a frame needs ~267; more catches up after a long frame).
-pub const BUDGET: u32 = 1024;
+/// Samples decoded per [`service`] at most: a frame needs ~267. The ring leads by ~1.9 s, so a deficit
+/// is made up 133 samples a frame instead of all at once (a catch-up of 1024 made the frame after a slow
+/// one slow too: 60 FPS is a hard limit). The C64 also skips the service on heavy frames.
+pub const BUDGET: u32 = 400;
 /// Samples the boot calibration's two one-shots differ by.
 pub const CLOCK_SAMPLES: u32 = 12_288;
 
@@ -363,9 +365,17 @@ fn timer16<H: Hw + ?Sized>(hw: &mut H) -> u16 {
     }
 }
 
-/// Once per frame, I/O banked in (`AUDIO` phase): advance the clock and keep the ring full.
+/// Samples a heavy frame decodes (the caller's choice, `service`'s `light`): a little under the ~267 a
+/// frame plays, so a heavy frame pays less; light frames make it up (`BUDGET`).
+pub const HEAVY_BUDGET: u32 = 200;
+/// Below this lead (samples) every frame decodes the full `BUDGET`, heavy or not.
+pub const SAFE_LEAD: u32 = 8192;
+
+/// Once per frame, I/O banked in (`AUDIO` phase): advance the clock and keep the ring full. A `light`
+/// frame decodes up to `BUDGET` samples, a heavy one up to `HEAVY_BUDGET` (unless the lead is short):
+/// the music is not game state, so its cost follows the frame's (60 FPS is a hard limit).
 #[inline(never)]
-pub fn service<H: Hw + ?Sized>(hw: &mut H, p: &mut Player) {
+pub fn service<H: Hw + ?Sized>(hw: &mut H, p: &mut Player, light: bool) {
     if p.state != RUNNING {
         return;
     }
@@ -386,7 +396,9 @@ pub fn service<H: Hw + ?Sized>(hw: &mut H, p: &mut Player) {
         p.produced = p.played + 256;
     }
     let target = p.played + RING_SAMPLES - GUARD;
-    let mut want = target.saturating_sub(p.produced).min(BUDGET) as u16;
+    let lead = p.produced - p.played;
+    let budget = if light || lead < SAFE_LEAD { BUDGET } else { HEAVY_BUDGET };
+    let mut want = target.saturating_sub(p.produced).min(budget) as u16;
     while want != 0 && p.state == RUNNING {
         let n = want.min(512);
         produce(hw, p, n);
@@ -778,17 +790,19 @@ mod tests {
         tune::started(&mut r, &mut p);
         assert_eq!(r.voices[0x20], 3, "right voice gated");
         let mut lead_min = u32::MAX;
-        for frame in 0..3000u32 {
-            // A frame of 60 Hz, with an occasional long one.
+        for frame in 0..6000u32 {
+            // A frame of 60 Hz, with an occasional long one; frames 1000..3500 a boss fight of mostly
+            // heavy frames (decoding less: the lead runs down to SAFE_LEAD and holds there).
             r.t += if frame % 97 == 0 { 40_000 } else { 17_045 };
-            service(&mut r, &mut p);
+            let light = !(1000..3500).contains(&frame) || frame % 4 == 0;
+            service(&mut r, &mut p, light);
             let played = ((r.t as f64) * 16_000.0 / 1_022_727.0) as u32;
             let _ = played;
             lead_min = lead_min.min(p.produced - p.played);
             assert!(p.produced - p.played <= RING_SAMPLES - GUARD + 1, "overran the right voice");
         }
         assert_eq!(p.underruns, 0);
-        assert!(lead_min > 20_000, "lead {lead_min}");
+        assert!(lead_min > SAFE_LEAD / 2, "lead {lead_min}");
         println!("audio: ticks {} lead min {lead_min} produced {}", p.ticks, p.produced);
     }
 }

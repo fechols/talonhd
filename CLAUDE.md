@@ -125,7 +125,13 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   line 4400, the scroll holds at 4560 (the step undoes the world's scroll) with `boss_ceiling` on. Phase 1:
   arms and front legs 15 HP each (TRIPLE FAN, MAST SWEEP); phase 2: rear legs snap, `hot` goes yellow
   (`game::palette`, a color-RAM fill), the cab rim takes 120 HP (RING BURST, OFFSET RINGS, TRIPLE FAN);
-  then 30,000 points, a chain of bursts, she sinks away and the stage scrolls on. Bullets go through
+  then 30,000 points and a chain of bursts; at its end (user: "show it in a damaged state and have it scroll
+  offscreen smoothly") she becomes a WRECK: a damaged body frame (`demo::QUEEN_WRECK_FRAME`, banked left/level/
+  right, 4 phases, `hand::queen_wreck_frames`: the Lattice dead, hull scorched, plates blown out) that glides
+  to the screen's centre and drifts down (easing to a line a tick) while the stage scrolls on, GONE only once
+  it has left the bottom (`her_wreck_drifts_off_smoothly`). Her aim is 16-bit octant + tangent thresholds
+  (`aim_finds_the_nearest_direction`: the exact nearest of 48 directions 98% of the time; the old 32-bit dot
+  product managed 71%). Bullets go through
   `World::spawn_ebullet`, scores through `add_score`. `the_fight_runs_to_the_end` plays it through.
 - **REU code paging** (`src/paging.rs`, as TALON's phases): rarely active code is a *phase* linked at the
   window `$9000-$9FFF`, fetched by `paging::page(id)` from REU `$FF0000` + 4 KiB × id when it is not
@@ -182,7 +188,10 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   `STAGING` (`SEG_BUF`) and stashes them into ONE 8-bit ring at REU `$FE8000` (32 Ki samples); the C64U
   sampler's left voice plays it, the right voice the same ring 160 samples (10 ms) later (Haas). The
   producer paces itself by CIA 2 timer A against a boot calibration (TUNE: two muted one-shots, CIA timers
-  A+B chained); state at `$C800-$C9FF`. No 32-bit divides on the 6502 (LLVM turns `/` + `%` into a 2.4 KB
+  A+B chained); state at `$C800-$C9FF`. Music is not game state, so the C64 schedules it by cost: every frame
+  runs the service, but a frame whose render took over `AUDIO_HEAVY_US` (7 ms) decodes up to `HEAVY_BUDGET`
+  (200 samples) and a light one up to `BUDGET` (400; ~267 a frame on average), unless the ring's lead is under
+  `SAFE_LEAD` (skipping services made 4 ms catch-up spikes). No 32-bit divides on the 6502 (LLVM turns `/` + `%` into a 2.4 KB
   divmod): subtraction loops. Host: `decode_matches_the_encoder` (bit-exact vs the encoder's decode),
   `the_ring_stays_ahead`; emu64 models the sampler and checks the ring. Hardware needs C64U config "Map
   Ultimate Audio $DF20-DFFF = Enabled"; no sampler = silent (fault `NO_SAMPLER`). Next: cue changes
@@ -195,7 +204,9 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   point → the motor: all 9 stick moves scored over a 24-tick lookahead against up to 16 nearby threats'
   predicted paths (bullets in straight lines, WASPs along the heading their turn program gives them mid-lookahead,
   GANNETs by their dive, live HATCHes as zones it never loiters over: they launch WASPs), progress, and a cost
-  for changing or reversing direction (~3 stick changes a second). It fires only while an enemy is on screen. Leads targets by the bolts'
+  for changing or reversing direction (~1.5 stick changes a second; on station it holds still,
+  `the_ace_holds_station_calmly`). It fires only while an enemy is on screen. Expert, not perfect (user: a
+  pilot that dies now and then says "I could do better than that!"). Leads targets by the bolts'
   flight; bosses publish their live weak part (`Boss::aim`, `Midboss::aim`). Three phases a tick (ATTRACT
   `see`, MOTOR `motor`, ACE `think`), sharing a `Mind` in `SEG_BUF`; its memory (`Ace`, 12 B) is in the
   `Game`, so the replay and `compare` stay exact. Time-sliced: one phase a tick (see, motor, think; a decision

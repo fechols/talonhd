@@ -426,6 +426,40 @@ fn queen_mesh() -> Mesh {
 pub const ARM_LEAN_DEG: f64 = 12.0;
 pub const LEG_SWING_DEG: f64 = 12.0;
 
+/// The GANTRY QUEEN's wreck (`demo::QUEEN_WRECK_FRAME`): her body at the `QUEEN_WRECK_BANKS` samples. The
+/// Lattice is dead (every material that could glow `hot` falls back to void/dark), the
+/// hull is scorched (lower albedo), and plates are blown out of the upper hull (a stable ~12% of its
+/// upward faces, chosen by hash, so the sea shows through).
+pub fn queen_wreck_frames(m: &crate::mesh::ModelFile) -> Vec<crate::encode::SpriteImage> {
+    let mut mesh = m.mesh.clone();
+    for mat in mesh.materials.iter_mut() {
+        if mat.ramp.contains(&HOT) {
+            *mat = Material::lit(&[VOID, DARK], 0.45, 0);
+        } else {
+            mat.albedo *= 0.7;
+        }
+    }
+    let mut kept = Mesh::new(mesh.materials.clone());
+    for (i, t) in mesh.tris.iter().enumerate() {
+        let (a, b, c) = (mesh.verts[t[0] as usize], mesh.verts[t[1] as usize], mesh.verts[t[2] as usize]);
+        let n = [(b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]), (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]), (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])];
+        let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-9);
+        let up = (n[2] / len).abs() > 0.5;
+        let h = (i as u32).wrapping_mul(2_654_435_761) >> 24;
+        if up && h < 31 {
+            continue;
+        }
+        kept.tri(a, b, c, mesh.mats[i]);
+    }
+    let view = crate::raster3d::View::centered(m.canvas.0, m.canvas.1, 1.0);
+    let orients = m.orientations();
+    let mut out = Vec::new();
+    for &b in crate::demo::QUEEN_WRECK_BANKS.iter() {
+        out.push(crate::raster3d::render(&kept, orients[b as usize], view));
+    }
+    out
+}
+
 /// The body's bank sample `b` (0..49) as a fraction (-1..1) and as a roll in radians.
 pub fn queen_bank(b: usize) -> (f64, f64) {
     let n = crate::demo::BOSS_BANKS as f64 - 1.0;

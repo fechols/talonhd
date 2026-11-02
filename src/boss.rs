@@ -14,9 +14,9 @@
 //! so the fight replays exactly like the rest of the game. Integer math only; positions come from the
 //! same `demo::queen` placement the renderer draws.
 
-use crate::demo::{self, BOSS_SIZE, PANO_PERIOD, QUEEN_SPRITES};
+use crate::demo::{self, BOSS_FRAME, BOSS_SIZE, PANO_PERIOD, QUEEN_SPRITES, QUEEN_WRECK_FRAME, QUEEN_WRECK_X};
 use crate::render::{Palette, Sprite};
-use crate::sim::actors::{B_ROUND, BURST_TICKS, SCROLL_Q8};
+use crate::sim::actors::{B_ROUND, SCROLL_Q8};
 use crate::sim::world::*;
 
 /// `Boss::state`.
@@ -26,6 +26,9 @@ pub const PHASE1: u8 = 2;
 pub const PHASE2: u8 = 3;
 pub const DYING: u8 = 4;
 pub const GONE: u8 = 5;
+/// After the explosions: her wreck (damaged frames, `demo::QUEEN_WRECK_FRAME`) drifts down and out
+/// smoothly while the stage scrolls on; GONE once it has left the bottom of the screen.
+pub const WRECK: u8 = 6;
 
 /// Stage lines: she comes into view at `ARRIVE` and the scroll stops at `HOVER` for the fight.
 pub const ARRIVE: u16 = 4400;
@@ -70,6 +73,10 @@ pub struct Boss {
     /// The playfield point of the weak part to shoot now (the attract pilot reads it, `crate::ace`); y
     /// `NO_AIM` when there is none.
     pub aim: [i16; 2],
+    /// The wreck: its frame and where it froze (screen coordinates; it then drifts down by `sink`).
+    pub wreck_frame: u16,
+    pub wreck_x: i16,
+    pub wreck_y: i16,
 }
 
 /// `Boss::aim` / `Midboss::aim` y when nothing can be hit.
@@ -92,21 +99,38 @@ const fn round(v: f64) -> i8 {
     (if v < 0.0 { v - 0.5 } else { v + 0.5 }) as i8
 }
 
-/// The direction index closest to (`dx`, `dy`).
+/// tan of the half-step angles (3.75 + 7.5 k degrees, k = 0..5) in Q8: the octant's direction boundaries.
+const TAN_STEP: [u8; 6] = [17, 51, 87, 126, 171, 225];
+
+/// Steps (0..=6, 7.5 degrees each) of the angle from the `major` axis toward the `minor` one
+/// (`minor <= major`, both < 128).
 #[inline(never)]
-fn aim(dx: i16, dy: i16) -> u8 {
-    let (mut best, mut at) = (i32::MIN, 0u8);
+fn octant_steps(minor: u16, major: u16) -> u8 {
     let mut k = 0;
-    while k < 48 {
-        let (vx, vy) = DIRS[k];
-        let d = vx as i32 * dx as i32 + vy as i32 * dy as i32;
-        if d > best {
-            best = d;
-            at = k as u8;
-        }
+    while k < 6 && (minor << 8) > major * TAN_STEP[k as usize] as u16 {
         k += 1;
     }
-    at
+    k
+}
+
+/// The direction index closest to (`dx`, `dy`) (`DIRS`: 0 straight down, rising toward screen right),
+/// in 16-bit math: scale into 7 bits, find the angle within the octant by its tangent thresholds, then
+/// place the octant (a dot product against all 48 took 96 32-bit multiplies on the 6502).
+#[inline(never)]
+fn aim(dx: i16, dy: i16) -> u8 {
+    let (mut ax, mut ay) = (dx.unsigned_abs(), dy.unsigned_abs());
+    while ax > 127 || ay > 127 {
+        ax >>= 1;
+        ay >>= 1;
+    }
+    // Steps (0..=12) from the vertical toward the horizontal.
+    let q = if ax <= ay { octant_steps(ax, ay) } else { 12 - octant_steps(ay, ax) };
+    match (dx >= 0, dy >= 0) {
+        (true, true) => q,
+        (true, false) => 24 - q,
+        (false, false) => 24 + q,
+        (false, true) => if q == 0 { 0 } else { 48 - q },
+    }
 }
 
 /// One round bullet from playfield (`x`, `y`) along direction `k`, `fast` = 1.5 instead of 1.25 px/tick.
@@ -117,17 +141,8 @@ fn shoot(w: &mut World, x: i16, y: i16, k: u8, fast: bool) {
     w.spawn_ebullet(B_ROUND, x, y, s(vx), s(vy));
 }
 
-/// A burst at playfield (`x`, `y`), reusing the slot with least time left (as TALON's own bursts).
-#[inline(never)]
-fn burst(w: &mut World, x: i16, y: i16) {
-    let mut best = 0;
-    for i in 1..BURSTS {
-        if w.bursts[i].t < w.bursts[best].t {
-            best = i;
-        }
-    }
-    w.bursts[best] = Burst { t: BURST_TICKS, x, y };
-}
+/// A burst at playfield (`x`, `y`): the ground units' resident helper (the same code; one copy).
+use crate::ground::burst;
 
 /// Where she is this tick: her sprites as the renderer places them (parts 0-5, body 6).
 pub fn placement(b: &Boss, w: &World, out: &mut [Sprite]) {
@@ -186,6 +201,10 @@ fn hits(w: &mut World, c: (i16, i16), half: (i16, i16)) -> u8 {
 impl Boss {
     /// Sprites she draws this tick (broken parts left out) into `out`; returns how many.
     pub fn sprites(&self, w: &World, out: &mut [Sprite]) -> usize {
+        if self.state == WRECK {
+            out[0] = Sprite { frame: self.wreck_frame, x: self.wreck_x, y: self.wreck_y + self.sink, z: 1 };
+            return 1;
+        }
         if !matches!(self.state, ARRIVING | PHASE1 | PHASE2 | DYING) {
             return 0;
         }
@@ -231,6 +250,10 @@ impl Boss {
         }
         if self.state == GONE {
             w.boss_ceiling = false;
+            return;
+        }
+        if self.state == WRECK {
+            self.drift(w);
             return;
         }
         // The fight holds the scroll (undo the world's step) and keeps the TALON below her.
@@ -369,17 +392,53 @@ impl Boss {
     fn dying(&mut self, w: &mut World, sp: &[Sprite]) {
         self.timer -= 1;
         let t = self.timer as i16;
-        if self.timer % 5 == 0 {
+        if self.timer & 3 == 0 {
+            // Scattered over her rim (shifts and xors, no multiplies or divides on the 6502).
             let r = rim(sp);
-            burst(w, r.0 + (t * 37 & 127) - 64, r.1 - (t * 53 & 63));
-        }
-        if self.timer < 60 {
-            // She sinks out past the TALON, faster and faster.
-            self.sink += (60 - t) / 8 + 1;
+            burst(w, r.0 + ((t << 5 ^ t) & 127) - 64, r.1 - ((t << 4 ^ t << 1) & 63));
         }
         if self.timer == 0 {
-            self.state = GONE;
+            // The last blasts cover the swap to her wreck, frozen where she was (the bank sample nearest
+            // a wreck frame); it then drifts out (`drift`).
+            let body = sp[6];
+            // The nearest of the wreck's banks (8, 24, 40 of 49).
+            let b = body.frame - BOSS_FRAME;
+            self.wreck_frame = QUEEN_WRECK_FRAME + if b < 16 { 0 } else if b < 33 { 1 } else { 2 };
+            self.wreck_x = body.x;
+            self.wreck_y = body.y;
+            self.sink = 0;
+            self.pat = 0;
+            self.step = 0;
+            let r = rim(sp);
+            burst(w, r.0, r.1);
+            burst(w, r.0 - 40, r.1 - 20);
+            burst(w, r.0 + 40, r.1 - 20);
+            self.state = WRECK;
             w.boss_ceiling = false;
+        }
+    }
+
+    /// The wreck drifts down, easing in over 64 ticks to a line a tick (the stage scrolls on under it),
+    /// gliding a pixel a tick to the screen's centre (she may have died far to one side), until it has
+    /// left the bottom of the screen.
+    #[inline(never)]
+    fn drift(&mut self, w: &mut World) {
+        w.boss_ceiling = false;
+        if self.wreck_x < QUEEN_WRECK_X {
+            self.wreck_x += 1;
+        } else if self.wreck_x > QUEEN_WRECK_X {
+            self.wreck_x -= 1;
+        }
+        if self.pat < 64 {
+            self.pat += 1;
+        }
+        self.step += self.pat;
+        while self.step >= 64 {
+            self.step -= 64;
+            self.sink += 1;
+        }
+        if self.wreck_y + self.sink >= crate::layout::HEIGHT {
+            self.state = GONE;
         }
     }
 }
@@ -389,6 +448,27 @@ mod tests {
     use super::*;
     use crate::game::Game;
     use crate::sim::FIRE;
+
+    #[test]
+    fn aim_finds_the_nearest_direction() {
+        // Against the exact nearest of the 48 angles (the old dot product over the rounded DIRS tied
+        // neighbours and took the lower index: it was right only ~71% of the time).
+        let (mut same, mut total) = (0u32, 0u32);
+        for dy in -260i16..=260 {
+            for dx in -320i16..=320 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let a = aim(dx, dy);
+                let exact = ((dx as f64).atan2(dy as f64) / (core::f64::consts::PI / 24.0)).round().rem_euclid(48.0) as i16;
+                let off = (a as i16 - exact).rem_euclid(48);
+                assert!(off == 0 || off == 1 || off == 47, "aim({dx}, {dy}) = {a}, the nearest is {exact}");
+                same += (off == 0) as u32;
+                total += 1;
+            }
+        }
+        assert!(same as f64 / total as f64 > 0.97, "{same} of {total} exact");
+    }
 
     #[test]
     fn directions_are_unit_and_ordered() {
@@ -403,6 +483,49 @@ mod tests {
 
     /// A pilot who parks under each live target in turn and holds FIRE (bullets are ignored by making the
     /// TALON invulnerable each tick) breaks her parts, opens phase 2, kills her, and the stage scrolls on.
+    #[test]
+    fn her_wreck_drifts_off_smoothly() {
+        // Beat her (as the_fight_runs_to_the_end), then follow the wreck.
+        let mut g = Game::new();
+        g.world.track_base = 1_000_000;
+        g.world.scroll = (ARRIVE as u32 - 10) << 8;
+        let mut wreck_ys = vec![];
+        let mut out = [Sprite::default(); QUEEN_SPRITES];
+        for _ in 0..30_000 {
+            g.world.player.invuln = 2;
+            g.world.player.invuln_kind = INV_ARM;
+            let mut sp = [Sprite::default(); QUEEN_SPRITES];
+            placement(&g.boss, &g.world, &mut sp);
+            let goal = if g.boss.state == PHASE1 {
+                (0..4).find(|&k| g.boss.broken & (1 << TARGETS[k]) == 0).map(|k| target(k, &sp).0.0)
+            } else {
+                Some(rim(&sp).0)
+            };
+            let px = (g.world.player.x >> 8) as i16;
+            let mut input = FIRE;
+            if let Some(x) = goal {
+                input |= if x < px - 2 { crate::sim::LEFT } else if x > px + 2 { crate::sim::RIGHT } else { 0 };
+            }
+            g.step(input);
+            if g.boss.state == WRECK {
+                let n = g.boss.sprites(&g.world, &mut out);
+                assert_eq!(n, 1, "the wreck is one sprite");
+                assert!((QUEEN_WRECK_FRAME..QUEEN_WRECK_FRAME + crate::demo::QUEEN_WRECKS).contains(&out[0].frame));
+                wreck_ys.push(out[0].y);
+                assert!(!g.world.boss_ceiling, "the wreck lets the TALON fly");
+            }
+            if g.boss.state == GONE {
+                break;
+            }
+        }
+        assert_eq!(g.boss.state, GONE);
+        assert!(wreck_ys.len() > 100, "the wreck is seen for {} ticks", wreck_ys.len());
+        // Smooth: never up, never more than a line a tick; gone only once fully below the screen.
+        assert_eq!(out[0].x, QUEEN_WRECK_X, "the wreck glides to the centre");
+        assert!(wreck_ys.windows(2).all(|w| (0..=1).contains(&(w[1] - w[0]))), "the wreck jumps");
+        assert!(*wreck_ys.last().unwrap() >= crate::layout::HEIGHT - 1, "she left at y {}", wreck_ys.last().unwrap());
+    }
+
     #[test]
     fn the_fight_runs_to_the_end() {
         let mut g = Game::new();

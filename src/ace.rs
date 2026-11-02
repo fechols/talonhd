@@ -83,6 +83,8 @@ const MARGIN: i16 = 6 * 64;
 /// Where the pilot waits: low and centred.
 const HOME_X: i16 = 152;
 const HOME_Y: i16 = 140;
+/// How close to `HOME` counts as on station (the pilot then holds still).
+const STATION_BAND: i16 = 16;
 /// Stick moves.
 static MX: [i8; 9] = [0, 0, 1, 1, 1, 0, -1, -1, -1];
 static MY: [i8; 9] = [0, -1, -1, 0, 1, 1, 1, 0, -1];
@@ -672,7 +674,7 @@ pub fn think(g: &mut Game, m: &mut Mind) -> u8 {
     } else {
         facts |= CLEAR;
     }
-    if (px - HOME_X).abs() < 8 && (py - HOME_Y).abs() < 8 {
+    if (px - HOME_X).abs() < STATION_BAND && (py - HOME_Y).abs() < STATION_BAND {
         facts |= STATION;
     }
 
@@ -711,7 +713,11 @@ pub fn think(g: &mut Game, m: &mut Mind) -> u8 {
     let mut input = if enemies_on_screen(g) { FIRE } else { 0 };
     let (mut gx, mut gy) = (HOME_X, HOME_Y);
     let mut pull = 2;
-    if action == EVADE {
+    if action == HOLD && (px - HOME_X).abs() < STATION_BAND && (py - HOME_Y).abs() < STATION_BAND {
+        // On station: stay put. Aiming at the exact point made a held move overshoot it (a stick move is
+        // held for a decision, ~12 px) and swing back and forth across it.
+        (gx, gy) = (px, py);
+    } else if action == EVADE {
         (gx, gy) = (px, 150);
         pull = 1;
     } else if action == FLANK {
@@ -825,6 +831,25 @@ mod tests {
         assert!(new.4, "the ace sinks the KEELBREAKER");
         assert!(new.5, "the ace beats the GANTRY QUEEN");
         assert!(new.1 > old.1, "the ace outscores the autopilot");
+    }
+
+    #[test]
+    fn the_ace_holds_station_calmly() {
+        // From a new game the first enemies come after a few seconds: with nothing on screen the pilot
+        // settles on station and holds still (user: "oscillates a lot when there are no enemies").
+        let mut g = Game::new();
+        let mut mind = Mind::new();
+        let mut moves = 0;
+        let mut last = 0u8;
+        for t in 0..400u32 {
+            let input = fly(&mut g, &mut mind) & (LEFT | RIGHT | UP | DOWN);
+            g.step(input);
+            if t >= 200 && !enemies_on_screen(&g) && input != last {
+                moves += 1;
+            }
+            last = input;
+        }
+        assert!(moves <= 4, "{moves} stick changes while holding station");
     }
 
     #[test]
