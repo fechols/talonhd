@@ -389,7 +389,7 @@ User: levels as offline-rendered 3D geometry lit like the sprites, a time of day
 ## Renderer unit costs on the C64U (2026-11-01, `bench` build)
 
 Measured at 64 MHz with the HUD raster IRQ running (`tools/c64u.py bench`; `asm/bench.S`, in the BOOT
-phase, runs once after boot):
+phase, runs once after boot; since the per-level load: in the ACE phase, with the music running):
 
 | primitive | cost |
 |---|---|

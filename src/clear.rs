@@ -667,8 +667,14 @@ mod tests {
         let mut pals = vec![];
         let mut out = [Sprite::default(); INSTANCES];
         let mut most_cards = 0;
+        assert_eq!(g.clear.level, 0);
         for _ in 0..4000 {
+            let was = g.clear.phase;
             g.step(0);
+            // The level (and so, on the C64, the image: `crate::uci`) changes only as play starts.
+            if g.clear.level != 0 {
+                assert_eq!((was, g.clear.phase), (STAGE, OFF), "the next level from the stage's first line");
+            }
             if phases.last() != Some(&g.clear.phase) {
                 phases.push(g.clear.phase);
             }
@@ -686,6 +692,7 @@ mod tests {
         }
         assert_eq!(phases, [DARK, FLYOUT, CARD, WALK, STAGE, OFF]);
         assert_eq!(g.clear.stage, 1);
+        assert_eq!(g.clear.level, 1, "S1 clears into S2 TERRACES");
         assert_eq!(g.clear.pal, PALETTES[1]);
         assert_eq!(g.world.state, PLAY);
         assert_eq!(g.world.deaths, deaths, "nobody died in the sequence");
@@ -703,5 +710,40 @@ mod tests {
         let n = crate::game::scene(&g, &mut out);
         let pf = crate::demo::PEREGRINE_FRAME;
         assert!(out[..n].iter().any(|s| (pf..pf + crate::demo::PLAYER_BANKS).contains(&s.frame)), "the PEREGRINE flies");
+    }
+
+    /// A game over on a later level starts the new game on the booted level (the C64 loads its image back).
+    #[test]
+    fn a_game_over_goes_back_to_the_first_level() {
+        let mut g = Game::new();
+        g.reset_at(0, LAST_LEVEL);
+        g.clear.stage = 1;
+        g.clear.level = 1;
+        g.clear.pal = PALETTES[1];
+        g.campanile.state = crate::campanile::GONE;
+        g.world.state = crate::sim::world::DYING;
+        g.world.lives = 0;
+        g.world.timer = 1;
+        let mut t = 0;
+        while g.world.state != PLAY {
+            g.step(0);
+            t += 1;
+            assert!(t < 1_000);
+        }
+        assert_eq!((g.clear.level, g.clear.stage, g.clear.top), (0, 0, LAST_LEVEL));
+    }
+
+    /// A C64 that cannot load (`status::TOP` = its booted level, `game::replay_level`'s `top`) plays its
+    /// level again after the clear; one that can goes on.
+    #[test]
+    fn the_next_level_waits_for_a_load() {
+        let mut g = Game::new();
+        g.reset_at(0, 0);
+        g.clear.start_stage(&mut g.world);
+        assert_eq!(g.clear.level, 0);
+        g.reset_at(0, LAST_LEVEL);
+        g.clear.start_stage(&mut g.world);
+        assert_eq!(g.clear.level, 1);
+        assert_eq!(crate::game::replay_level(1, 0, 0).clear.top, 1, "a top under the level is the level");
     }
 }

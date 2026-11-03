@@ -3,18 +3,21 @@
 only the 6502 build shows: `$01` banking of `$D000-$DFFF` (I/O or RAM), a REU that executes DMAs against
 the level image, a raster counter and CIA 2 timers A+B driven by the cycle count, an idle joystick, and
 the C64 Ultimate sampler's timing ($DF20/$DF40: mapping probe, one-shot completion, the repeating ring's
-play position; audio.rs). No video, no IRQs (the HUD multiplexer is not modelled).
+play position; audio.rs), and with `--level-dir` the Ultimate Command Interface's DOS target ($DF1C-$DF1F:
+the per-level load, `src/uci.rs`, serving that directory's image files). No video, no IRQs (the HUD
+multiplexer is not modelled).
 
 At the end it checks the music: the producer stays ahead of the modelled sampler, and the ring holds the
 track's samples as the encoder decodes them (output/audio/<cue>.preview.wav, rounded to 8 bits).
 
     python tools/emu64.py [--prg dist/talonhd.prg] [--reu dist/talonhd.reu] [--elf dist/talonhd.elf]
-                          [--frames N] [--trace N]
+                          [--frames N] [--trace N] [--level-dir dist] [--device-dir P]
 
 Stops on an illegal opcode, a write into the hardware stack page by DMA, a jump outside known code, or
 after N frames (counted by `$DD00` buffer flips); prints the last instructions and DMAs.
 """
 import argparse
+import os
 import collections
 import subprocess
 import sys
@@ -42,6 +45,93 @@ def symbols(elf):
     return syms
 
 
+class Uci:
+    """The Ultimate Command Interface's DOS target as `src/uci.rs` drives it (`model::Uci` on the host):
+    CHANGE_DIR (only `device_dir`, the PRG's `uci::LEVEL_DIR`; the files come from `folder`), OPEN_FILE,
+    LOAD_REU, CLOSE_FILE, ABORT. Commands finish at once; replies come in 16-byte packets (DATA_MORE until
+    the last), and replies and status strings are worded as the firmware's (1541ultimate dos.cc)."""
+    CONTROL, COMMAND, RESPONSE, STATUS = 0xDF1C, 0xDF1D, 0xDF1E, 0xDF1F
+
+    PACKET = 16
+
+    def __init__(self, folder, reu, device_dir):
+        self.folder, self.reu, self.device_dir = Path(folder), reu, device_dir.rstrip('/')
+        self.cmd, self.reply, self.status = bytearray(), bytearray(), bytearray()
+        self.more = []
+        self.state, self.error, self.open, self.in_dir = 0, False, None, False
+        self.log = []
+
+    def read(self, a):
+        if a == self.CONTROL:
+            return (self.state | (8 if self.error else 0) | (0x80 if self.reply else 0)
+                    | (0x40 if self.status else 0))
+        if a == self.COMMAND:
+            return 0xC9
+        q = self.reply if a == self.RESPONSE else self.status
+        return q.pop(0) if q else 0
+
+    def write(self, a, v):
+        if a == self.COMMAND:
+            self.cmd.append(v)
+        elif a == self.CONTROL:
+            if v & 1:
+                if self.state:
+                    self.error = True
+                    self.log.append('PUSH refused: not idle')
+                else:
+                    c, self.cmd = bytes(self.cmd), bytearray()
+                    self.status += self.execute(c)
+                    self.more = [self.reply[i:i + self.PACKET] for i in range(0, len(self.reply), self.PACKET)]
+                    self.reply = bytearray(self.more.pop(0) if self.more else b'')
+                    self.state = 0x30 if self.more else 0x20
+            if v & 2:
+                self.reply.clear()
+                self.status.clear()
+                if self.more:
+                    self.reply = bytearray(self.more.pop(0))
+                    self.state = 0x30 if self.more else 0x20
+                else:
+                    self.state = 0
+            if v & 4:
+                self.log.append('ABORT')
+                self.reply.clear()
+                self.status.clear()
+                self.cmd.clear()
+                self.more = []
+                self.state = 0
+            if v & 8:
+                self.error = False
+
+    def execute(self, c):
+        text = lambda b: b.split(b'\0')[0].decode()
+        if c[:2] == b'\x01\x11':
+            path = text(c[2:]).rstrip('/')
+            self.in_dir = path == self.device_dir
+            self.log.append(f'CHANGE_DIR {path}: {"ok" if self.in_dir else "no such directory"}')
+            return b'00,OK' if self.in_dir else b'83,NO SUCH DIRECTORY'
+        if c[:2] == b'\x01\x02':
+            name = text(c[3:])
+            path = self.folder / name
+            self.open = path if self.in_dir and path.is_file() else None
+            self.log.append(f'OPEN_FILE {name} mode {c[2]}: {"ok" if self.open else "not found"}')
+            return b'00,OK' if self.open else b'62,FILE NOT FOUND'
+        if c[:2] == b'\x01\x21':
+            if self.open is None:
+                return b'85,NO FILE OPEN'
+            addr = int.from_bytes(c[2:6], 'little') & 0xFFFFFF
+            length = min(int.from_bytes(c[6:10], 'little') & 0x1FFFFFF, (1 << 24) - addr)
+            data = self.open.read_bytes()[:length]
+            self.reu[addr:addr + len(data)] = data
+            self.log.append(f'LOAD_REU ${addr:06x} cap ${length:06x}: {len(data)} bytes')
+            self.reply += f'${len(data):6x} BYTES LOADED TO REU ${addr:6x}'.encode()
+            return b'00,OK'
+        if c[:2] == b'\x01\x03':
+            self.open = None
+            self.log.append('CLOSE_FILE')
+            return b'00,OK'
+        raise KernelError(f'UCI command {c.hex()} not modelled')
+
+
 class C64(Cpu):
     def __init__(self, ram, reu):
         super().__init__(ram, [])
@@ -54,6 +144,7 @@ class C64(Cpu):
         self.one_shot_end = None
         self.play_start = None
         self.rate = 16000.0
+        self.uci = None
 
     def io_on(self):
         return self.mem[1] & 3 != 0 and self.mem[1] & 4 != 0
@@ -81,6 +172,8 @@ class C64(Cpu):
                 return 0xFF
             if a == 0xDF00:
                 return 0x40 | 0x10  # end of block, 256k+ REU
+            if 0xDF1C <= a <= 0xDF1F and self.uci:
+                return self.uci.read(a)
             return self.io[r]
         return self.mem[a]
 
@@ -89,6 +182,8 @@ class C64(Cpu):
         v &= 0xFF
         if 0xD000 <= a < 0xE000 and self.io_on():
             self.io[a - 0xD000] = v
+            if 0xDF1C <= a <= 0xDF1F and self.uci:
+                self.uci.write(a, v)
             if a == 0xDF01 and v & 0x80:
                 self.dma(v)
             if a == 0xDD00:
@@ -180,6 +275,9 @@ def main():
     ap.add_argument('--trace', type=int, default=40)
     ap.add_argument('--steps', type=int, default=60_000_000)
     ap.add_argument('--progress', type=int, default=0)
+    ap.add_argument('--level-dir', help='serve the per-level load (UCI) from this directory')
+    ap.add_argument('--device-dir', default=os.environ.get('TALONHD_DIR', '/Usb0/talonhd'),
+                    help="the device directory the UCI answers to (the PRG's TALONHD_DIR; default /Usb0/talonhd)")
     args = ap.parse_args()
     syms = symbols(args.elf)
     addr2sym = sorted((v, k) for k, v in syms.items())
@@ -197,6 +295,8 @@ def main():
     reu = bytearray(16 << 20)
     image = Path(args.reu).read_bytes()
     cpu = C64(ram, reu)
+    if args.level_dir:
+        cpu.uci = Uci(args.level_dir, reu, args.device_dir)
     # The PRG waits for the image after erasing its magic: install it once the erase has happened.
     # Install on the first header read, after the erase (the `bench` build has none).
     erase = next((v for k, v in syms.items() if 'read_image' in k), -1)
@@ -236,6 +336,8 @@ def main():
         print(f'ran {cpu.flips} flips, {steps} instructions, no fault')
         print(f'soft stack: deepest write ${cpu.stack_low:04x} ({0xD000 - cpu.stack_low} bytes below $D000, '
               f'limit 464: the static frames end at $CE30)')
+        if cpu.uci:
+            print('level load:', '; '.join(cpu.uci.log) or 'none', f'(the REU holds level {reu[63]})')
         # The stage's cue: the image's level is header byte 63 (`format::header::LEVEL`).
         check_music(cpu, reu, f'output/audio/cue.stage_s{reu[63] + 1}.preview.wav')
         return

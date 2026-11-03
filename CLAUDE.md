@@ -69,15 +69,18 @@ python tools/test_hud_irq.py             # HUD raster IRQ vs the table contract
 python tools/check_phases.py             # REU paging audit: resident code enters the window only at phase entries; a
                                          # phase's calls/jumps land only on its own functions (phases share addresses)
 python tools/emu64.py --frames 160       # the real PRG in a 6502 + REU + $01 model: finds 6502-only faults
+                                         # (--level-dir dist: + the UCI, serving the per-level load)
 pwsh scripts/build-windows.ps1 -Features start-keel   # debug: the attract game starts just before the midboss
 pwsh scripts/build-windows.ps1 -Features start-boss   # debug (S2 image, bake it after): just before the ASTROLABE
+pwsh scripts/build-windows.ps1 -Features start-s2     # debug: boot S1's image, load S2's at once (emu64 --level-dir)
 ```
 
 Always run `tools/test_blit.py` and `tools/test_sprite.py` (after a bake) after touching `target-c64/asm/blit.S`; write
 named conditional branches as `bxx 90f / jmp label / 90:` (the assembler silently mis-encodes
-out-of-range branches). Hardware (`C64U_HOST` = device IP): `python tools/c64u.py config`, `run dist/talonhd.prg`,
+out-of-range branches). Hardware (`C64U_HOST` = device IP): `python tools/c64u.py config`, `upload-levels`
+(both level images to `/Usb0/talonhd` over FTP, for the per-level load), `run dist/talonhd.prg`,
 then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset), `dump dist/dump --hold`,
-`cargo run --release -- compare --dump dist/dump`.
+`cargo run --release -- compare --dump dist/dump` (it picks the image of the level the replay reached).
 
 ## Architecture
 
@@ -143,10 +146,11 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   `dist/phases/` and stamps the PRG (`PHASE_STAMP`), `bake` embeds them in the level REU image (header
   `PHASES`, lengths in 256-byte pages (u8: up to 15 phases; byte 63 is the image's `LEVEL`), stamp at 34), and boot (`install_phases`) copies them to the phase bank; a stamp mismatch
   is fatal (border 8). So: build the C64 program, then bake, then `run` + `upload-reu`. Phases: `BOSS` (the fight's step logic; `Boss::sprites/palette` and `placement` stay resident),
-  `ATTRACT` (ACE's `see`), `MIDBOSS` (the KEELBREAKER's step), `BOOT` (`hud_init`, image checks,
-  `install_phases`, `Game::reset`), `GROUND` (the ground units' step; paged while `Ground::busy`), `AUDIO`
-  (the music producer, every frame), `TUNE` (music setup, once), `ACE` and `MOTOR` (ACE's `think` and
-  `motor`; ATTRACT, MOTOR and ACE are each paged once every attract tick), `STAGE` (the stage clear's
+  `ATTRACT` (ACE's `see`), `MIDBOSS` (the KEELBREAKER's step), `BOOT` (`boot_image`: image checks,
+  `install_phases`, `hud_init`, `Game::reset`; `read_image`), `GROUND` (the ground units' step; paged while `Ground::busy`), `AUDIO`
+  (the music producer, every frame), `TUNE` (music setup, at boot and per level; also
+  `boot_irq` and the per-level load's `load_level` + `uci`), `ACE` and `MOTOR` (ACE's `think` and
+  `motor`; ACE also holds the `bench` feature's `asm/bench.S`, run once after `start_music`; ATTRACT, MOTOR and ACE are each paged once every attract tick), `STAGE` (the stage clear's
   step, and at render time `Clear::sprites` while a card shows), and S2's three: `S2` (`stage2::waves`:
   placements and WASP strings, paged only while one is due), `S2GND` (`gnd2::step`, while `Ground::gnd`) and
   `S2AIR` (`air2::step`, while `Ground::air`), paged by the resident `stage2::run`; and `ASTRO` (the
@@ -165,7 +169,8 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   time: no 32-bit multiply); the palette walks to the next stage's colors (`fx.promotion_walk`, `clear::toward`: through the luminance
   groups' greys, void first, hot last, a step every 8 ticks) while the next airframe (the hand-built
   PEREGRINE, `hand::peregrine`, TALON handling for now) climbs in; the next stage's card; then play from
-  line 0 (`start_stage`). Until S2 exists that is BREAKWATER again in S2's palette (`clear::PALETTES`).
+  line 0 (`start_stage`), on the next level (past the last built one, the last again in the next stage's
+  palette, `clear::PALETTES`).
   Card text is baked: one frame per line (`font.rs`, a condensed 3×7 font: 6×7 on screen; lines of at most 19
   characters, inside the HUD's ladders; a `void` plate, stored unshifted),
   digits as small frames. The PEREGRINE's energy waves are one 8-step field drawn under its bank frame
@@ -206,9 +211,10 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
 - **Levels** (`Clear::level`: 0 S1, 1 S2; `first`/`top`): every level image has the same frame ids; the COMMON
   frames (WASP, ships, shots, bursts, SPARKs, cards) sit at their S1 ids rendered under the stage's light, and
   the stage block reuses the slots of S1's bosses (`demo::S2_*` from 0; `models::stage_frames`). Header byte
-  `LEVEL` (63) names the image's level; boot calls `Game::reset_at(img.level)`, so a C64 plays the level of
-  the image it booted, and keeps it after the clear until the per-level load exists (`top`); the host's
-  `Game::new()` plays S1 then S2. `game::replay_level` (preview, compare) replays an image's attract mode. S2's
+  `LEVEL` (63) names the image's level; boot calls `Game::reset_at(img.level, top)`: a C64 starts on the level
+  of the image it booted and goes on to `LAST_LEVEL` when it can load the others (below), else stays on it;
+  the host's `Game::new()` plays S1 then S2. `game::replay_level` (preview, compare) replays an image's
+  attract mode on a C64 that loads. S2's
   waves are `stage2::PLACEMENTS` (6-byte `P2`, from the bible's 14 waves, `s2_placements_sit_on_the_level`):
   PIKEs on `air2::RAILS` (the level's vine rows, aqueduct channel, lanes and a gravel path, sampled every 32
   px; `the_rails_follow_the_level` regenerates them from `s2.rs`), KESTREL pairs, ROOF HATCHes on farmhouses
@@ -216,8 +222,8 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   last 20 ticks, then the sim's own shootable `B_BOMB`), S2's PILLBOX, WASP strings along the sim's own
   curves. The vendored sim's S1 track is held off (`track_base`); air units ram the ship by putting a WASP on
   it (the sim's own collision). The world's scroll wraps at `PANO_PERIOD` (`Game::step`), so the stage line
-  is the scroll, never a 32-bit modulo. Music: `assets/music/cue.stage_s2.dlt`. Not yet: the per-level
-  load (after S2's clear the C64 plays TERRACES again as stage 3 in S3's colors, as S1 did before S2).
+  is the scroll, never a 32-bit modulo. Music: `assets/music/cue.stage_s2.dlt`. After S2's clear the C64
+  plays TERRACES again as stage 3 in S3's colors (no S3 yet).
   A game over on a later stage sets S2's fights GONE (not stepped at their hold behind the GAME OVER;
   below their lines the new game resets them, `hot` its own).
   Tests: `stage2::tests` (ACE flies S2 through both fights and the clear: 0 deaths, 13,049 ticks).
@@ -322,11 +328,41 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   of big structs, and repeated store sites (`game::put` is the scene's one sprite store). `World::digest` stays host-only
   (2 KB of 6502). `asm/mem.S` replaces compiler_builtins' 536-byte `memcpy` (a page loop, ~50 bytes; it freed the RAM the
   stage clear needed). Keep the `/DISCARD/ .init.250` rule: it calls KERNAL CHROUT at `$FFD2`, which is our code now.
+- **Per-level load** (`src/uci.rs`; user chose it after S2): when the step changes `Clear::level` (a clear's
+  `start_stage`, or a game over back to `first`), `main` loads that level's image file (`uci::LEVEL_FILES`,
+  in `uci::LEVEL_DIR`: `TALONHD_DIR` at build time, default `/Usb0/talonhd`) before drawing anything from
+  it: the Ultimate Command Interface's DOS target (`$DF1C-$DF1F`, C64U config "Command Interface"
+  Enabled), `CHANGE_DIR`, `OPEN_FILE`, `LOAD_REU` at 0 capped at `ace::MIND_REU` (the Ultimate reads the file
+  straight into REU memory; images never reach the Mind, the ring or the phase bank, and carry the same
+  phases), `CLOSE_FILE`; `00` statuses mean the whole file arrived (no checksum: seconds at 16 MB). The
+  front buffer holds the last frame (the next stage's card, or GAME OVER), the HUD runs on, the music is
+  muted and restarted on the new cue (`start_music`), the sprite cache emptied (common frames differ per
+  stage light). The main loop is per level: outer loop music + cache, inner frame loop while the level
+  matches. Every wait is bounded (`uci::SHORT` ~2 s, `LONG` ~33 s for `LOAD_REU`: 65,536-poll units, a
+  guess until measured) and a timeout ABORTs; an interface found mid-command is aborted first, a refused
+  push (`ERROR`) aborted and sent once more; replies are drained packet by packet (`DATA_MORE`); paths
+  and names end in a NUL. `load_image`'s outcome: `LOADED`; `UNCHANGED` (cd/open failed: nothing written,
+  the game stays on the loaded level, `first`/`top` = it); `DAMAGED` (`LOAD_REU` failed: part of the file
+  may be in the REU, so `load_level` sets an impossible level and `level_image` stops, border 9, as for a
+  wrong level or stamp). No UCI (`uci::present`: id `$C9` at `$DF1D`): `top` is the booted level.
+  `status::TOP` (byte 3) holds `Clear::top` (boot, and a fallback); `compare` replays to it
+  (`game::replay_level(level, top, t)`; 0 in an older dump: no load; `preview --top N`, default
+  `LAST_LEVEL`). Not replayable: a fallback mid-run from a level other than the booted one. Host:
+  `model::Uci` (`chunked`, `stalled_at`, `mid_command`; `uci::tests`: load, missing file, split reply,
+  timeouts, stuck interface); emu64's `Uci` with `--level-dir` answers only `--device-dir` (the PRG's
+  `TALONHD_DIR`, default `/Usb0/talonhd`) and splits replies into 16-byte packets (`start-s2`: load,
+  header level 1, S2's cue in the ring). The C64-side register bits come from the Ultimate's C API, not
+  yet proven on the C64U; load time not yet measured.
 - **Boot:** the PRG erases the REU magic, then waits for magic + whole-image checksum, so `run` then `upload-reu`
   always starts on the complete new image.
 - **6502 size:** never u32/i32 math in our code (user: "massive code bloat"); a u32 `%` in `lines()` cost
   over 400 bytes of resident RAM. Check `llvm-size -A dist/talonhd.elf` and the link map after changes.
-- **Next:** the per-level REU load (it must not overwrite the phase bank `$FF0000`). Then animation loops for the other stages. Memory ideas from the
+  LLVM inlines single-caller functions into `main` (resident RAM): `game::view` and `render::sort_by_z`
+  are `#[inline(never)]` to stay in their regions; never pass `&mut` to main's `Image` (it moves to the
+  soft stack, every field access indirect): return it by value.
+- **Next:** the per-level load on the C64U (`upload-levels`, the `start-s2` build, its load time; then ACE's
+  attract run through S1's clear into S2). Then S3 REDLINE (bible first) and animation loops for the other
+  stages. Memory ideas from the
   sibling repos still open: `opt-level "z"`, zero page `$90-$FF`, boot-only code in a retired section,
   borrow-and-restore overlays (impact), an IRQ static-frame audit (sueme64).
 - **Hardware quirk:** `c64u.py run` right after `config` can reset the machine before the PRG loads; run again.

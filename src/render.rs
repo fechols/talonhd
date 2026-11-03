@@ -233,7 +233,9 @@ pub fn hud_update<H: Hw + ?Sized>(hw: &mut H, s: &hud::State) {
     }
 }
 
-/// Stable insertion sort by z (few sprites; no allocation).
+/// Stable insertion sort by z (few sprites; no allocation). Never inlined: it lives in `.lowtext`, not
+/// main RAM (`target-c64/link.ld`).
+#[inline(never)]
 pub fn sort_by_z(sprites: &mut [Sprite]) {
     for i in 1..sprites.len() {
         let s = sprites[i];

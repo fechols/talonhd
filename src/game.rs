@@ -95,11 +95,12 @@ impl Game {
     }
 
     /// Power-on state on the level of the image in the REU (`format::header::LEVEL`): new games start
-    /// there and stay there until the per-level load exists (C64 boot, paged with `reset`).
+    /// there; stage clears go on up to level `top` (C64 boot, paged with `reset`: `clear::LAST_LEVEL` when
+    /// the machine can load the other levels' images, `crate::uci`, else the booted level again).
     #[inline(never)]
-    pub fn reset_at(&mut self, level: u8) {
+    pub fn reset_at(&mut self, level: u8, top: u8) {
         self.reset();
-        self.clear = Clear::at(level, level);
+        self.clear = Clear::at(level, top);
     }
 
     /// One tick with this tick's input.
@@ -265,7 +266,8 @@ fn shake_cols(sx: i8) -> (i8, i8) {
 }
 
 /// The view this frame: panorama window, column shift and XSCROLL, moved by the shake (sprites follow
-/// in `scene`).
+/// in `scene`). Never inlined: it lives in `.hitext`, not main RAM (`target-c64/link.ld`).
+#[inline(never)]
 pub fn view(g: &Game, img: &crate::render::Image) -> crate::render::Scroll {
     let (sx, sy) = shake(g);
     let line = (demo::scroll(lines(g)) as i16 - sy as i16).rem_euclid(PANO_PERIOD as i16) as u16;
@@ -429,14 +431,16 @@ pub fn hud_state(g: &Game) -> hud::State {
 /// C64 shows when nobody touches the stick).
 #[cfg(feature = "host")]
 pub fn replay(ticks: u32) -> Game {
-    replay_level(0, ticks)
+    replay_level(0, crate::clear::LAST_LEVEL, ticks)
 }
 
-/// [`replay`] on a C64 booted with level `level`'s image (`Game::reset_at`).
+/// [`replay`] on a C64 booted with level `level`'s image (`Game::reset_at`) that goes on up to level
+/// `top` (`clear::LAST_LEVEL` when it loads the other levels' images as it reaches them, `crate::uci`;
+/// its booted level when it cannot: the C64's `status::TOP`). A `top` under `level` means `level`.
 #[cfg(feature = "host")]
-pub fn replay_level(level: u8, ticks: u32) -> Game {
+pub fn replay_level(level: u8, top: u8, ticks: u32) -> Game {
     let mut g = Game::new();
-    g.reset_at(level);
+    g.reset_at(level, top.max(level));
     let mut mind = crate::ace::Mind::new();
     for _ in 0..ticks {
         let input = crate::ace::fly(&mut g, &mut mind);

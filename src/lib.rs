@@ -30,6 +30,7 @@ pub mod layout;
 pub mod render;
 pub mod sim;
 pub mod stage2;
+pub mod uci;
 
 #[cfg(feature = "host")]
 pub mod bake;

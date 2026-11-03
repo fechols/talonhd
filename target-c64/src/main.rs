@@ -96,7 +96,7 @@ fn raster(c: &mut C64) -> u16 {
 #[cfg(feature = "bench")]
 unsafe extern "C" {
     /// `asm/bench.S`: time the renderer's primitives on this machine (u16 microseconds per test at `$CA60`,
-    /// `$BE` at `$CA7E` when done). In the BOOT phase (run once); the game then carries on.
+    /// `$BE` at `$CA7E` when done). In the ACE phase (run once); the game then carries on.
     fn bench_all();
 }
 
@@ -178,6 +178,62 @@ pub extern "C" fn talonhd_page(p: u8) {
     c.poke(0x0001, port);
 }
 
+/// The game has reached another level (`Clear::start_stage`, or a game over back to the first): load
+/// that level's image file into the REU (`talonhd::uci`). The front buffer keeps the last frame (the next
+/// stage's card, or GAME OVER) and the HUD runs on while it loads; the music is muted (`main` restarts it
+/// on the new image's cue). The HUD's blocks (`hud::static_blocks`) and the phases are the same in every
+/// image. From the TUNE phase (paged next for the music); [`level_image`] reads the result.
+#[inline(never)]
+fn load_level(c: &mut C64, g: &mut Game, from: u8) {
+    talonhd::audio::mute(c);
+    match talonhd::uci::load_image(c, g.clear.level) {
+        talonhd::uci::LOADED => {}
+        talonhd::uci::UNCHANGED => {
+            // Nothing was written: this level again, as on a C64 that cannot load (`compare` replays
+            // it from `status::TOP`).
+            g.clear.level = from;
+            g.clear.first = from;
+            g.clear.top = from;
+            c.poke(layout::STATUS + status::TOP, from);
+        }
+        // Part of the file may be in the REU (even under the old header): no level matches, so
+        // `level_image` stops (border 9) before anything is drawn from it.
+        _ => g.clear.level = 0xFF,
+    }
+}
+
+/// The image [`load_level`] left in the REU: the level asked for, baked with these phases (the Ultimate's
+/// `00` says the whole file arrived), else fatal (border 9). Resident, called with BOOT paged (for
+/// `render::read_image`). (By value: an `&mut` to main's image would put it on the soft stack.)
+#[inline(never)]
+fn level_image(c: &mut C64, g: &Game) -> Image {
+    // SAFETY: a plain read of a static the build patches; volatile so it is not folded to 0xFFFF.
+    let stamp = unsafe { core::ptr::read_volatile(&raw const PHASE_STAMP) };
+    match render::read_image(c) {
+        Some(img) if img.level == g.clear.level && img.phase_stamp == stamp => {
+            c.poke(0xD020, img.border);
+            img
+        }
+        _ => fatal(c, 9),
+    }
+}
+
+/// Start the image's stage music: the track's header, the ring filled, both voices set up and gated
+/// together, the clock started (each level's image, `main`).
+#[inline(always)]
+fn start_music(c: &mut C64, player: &mut talonhd::audio::Player, music: u32) {
+    paging::page(paging::TUNE);
+    talonhd::audio::tune::load(c, player, music);
+    paging::page(paging::AUDIO);
+    talonhd::audio::prime(c, player);
+    if player.state == talonhd::audio::RUNNING {
+        paging::page(paging::TUNE);
+        talonhd::audio::tune::arm(c);
+        unsafe { audio_gate() };
+        talonhd::audio::tune::started(c, player);
+    }
+}
+
 /// Render time (us) above which a frame counts as heavy for the music (`audio::service`).
 const AUDIO_HEAVY_US: u16 = 7000;
 
@@ -253,17 +309,10 @@ fn status_poke16(c: &mut C64, offset: u16, value: u16) {
     c.poke(layout::STATUS + offset + 1, (value >> 8) as u8);
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn main() -> i16 {
-    let c = &mut C64;
-    // The BOOT phase rides in the PRG, in frame-buffer space boot overwrites soon after: stash it first.
-    unsafe {
-        let len = &raw const __phase_boot_size as u16;
-        talonhd::hw::stash(c, &raw const __phase_boot_load_start as u16, paging::REU_PHASES + paging::BOOT as u32 * paging::PHASE_SLOT, len);
-        PHASE_LEN[paging::BOOT as usize] = len.div_ceil(256) as u8;
-    }
-    // Boot-only code (image checks, HUD setup) runs from the paging window.
-    paging::page(paging::BOOT);
+/// Boot, from the BOOT phase: the turbo, the level image (verified, its phases installed), the display and
+/// the HUD's blocks, and the game reset on the image's level.
+#[inline(never)]
+fn boot_image(c: &mut C64, g: &mut Game) -> Image {
     // 64 MHz with badlines off (C64U turbo registers); harmless elsewhere.
     c.poke(0xD031, 0x8F);
     c.poke(0xD011, 0x0B); // blank while setting up
@@ -281,7 +330,7 @@ pub extern "C" fn main() -> i16 {
     if preloaded.is_none() {
         render::invalidate_image(c);
     }
-    let mut img: Image = if let Some(img) = preloaded { img } else { loop {
+    let img: Image = if let Some(img) = preloaded { img } else { loop {
         if let Some(img) = render::read_image(c) {
             if render::verify_image(c, &img) {
                 break img;
@@ -312,28 +361,22 @@ pub extern "C" fn main() -> i16 {
     // HUD: sprite blocks into both banks, sprites set up, the multiplexer
     // table filled, then the raster IRQ chain started at the top border.
     render::hud_init(c, &img);
-    #[allow(static_mut_refs)]
-    let g = unsafe { &mut GAME };
-    // On the level of the image in the REU: until the per-level load exists, the game stays on it.
-    g.reset_at(img.level);
-    // The sampler's clock against CIA 2 (about 1.5 s of muted one-shots; no sampler, no music) and the
-    // stage music's header.
-    let player = talonhd::audio::player();
-    paging::page(paging::TUNE);
-    talonhd::audio::tune::calibrate(c, player);
-    talonhd::audio::tune::load(c, player, img.music);
-    #[cfg(feature = "start-keel")]
+    // On the level of the image in the REU; stage clears go on to the next levels' images when the
+    // Ultimate Command Interface can load them (`load_level`), else to this level again.
+    let top = if talonhd::uci::present(c) { talonhd::clear::LAST_LEVEL } else { img.level };
+    g.reset_at(img.level, top);
+    // Debug: boot S1's image and load S2's at once (the per-level load in a few frames).
+    #[cfg(feature = "start-s2")]
     {
-        g.world.scroll = (talonhd::midboss::ARRIVE as u32 - 20) << 8;
-        g.world.track_base = 1_000_000;
+        g.clear.level = top;
     }
-    #[cfg(feature = "start-boss")]
-    {
-        g.world.scroll = (talonhd::astrolabe::HOLD as u32 - 10) << 8;
-        g.campanile.state = talonhd::campanile::GONE;
-    }
-    #[allow(static_mut_refs)]
-    let sprites = unsafe { &mut SPRITES };
+    img
+}
+
+/// Boot, from the TUNE phase (just paged for the sampler's calibration), after it: the HUD's first table, the raster IRQ chain
+/// started at the top border, the status block cleared.
+#[inline(never)]
+fn boot_irq(c: &mut C64, g: &Game) {
     render::hud_update(c, &game::hud_state(g));
     c.poke(layout::HUD_TABLE, 0);
     let vector = hud_irq as usize as u16;
@@ -346,150 +389,188 @@ pub extern "C" fn main() -> i16 {
     for i in 0..32 {
         c.poke(layout::STATUS + i, 0);
     }
-    // The stage music: fill the ring, set both voices up, gate them together, start the clock.
-    paging::page(paging::AUDIO);
-    talonhd::audio::prime(c, player);
-    if player.state == talonhd::audio::RUNNING {
-        paging::page(paging::TUNE);
-        talonhd::audio::tune::arm(c);
-        unsafe { audio_gate() };
-        talonhd::audio::tune::started(c, player);
-    }
+    c.poke(layout::STATUS + status::TOP, g.clear.top);
+}
 
-    // Feature `bench`: the renderer's unit costs, measured after a full boot (HUD IRQ running, as in play).
-    #[cfg(feature = "bench")]
-    {
-        // The bench lives in the BOOT phase (run once).
-        paging::page(paging::BOOT);
-        unsafe { bench_all() };
+#[unsafe(no_mangle)]
+pub extern "C" fn main() -> i16 {
+    let c = &mut C64;
+    // The BOOT phase rides in the PRG, in frame-buffer space boot overwrites soon after: stash it first.
+    unsafe {
+        let len = &raw const __phase_boot_size as u16;
+        talonhd::hw::stash(c, &raw const __phase_boot_load_start as u16, paging::REU_PHASES + paging::BOOT as u32 * paging::PHASE_SLOT, len);
+        PHASE_LEN[paging::BOOT as usize] = len.div_ceil(256) as u8;
     }
-    render::reset_sprite_cache(c);
+    // Boot-only code (image checks, HUD setup) runs from the paging window.
+    paging::page(paging::BOOT);
+    #[allow(static_mut_refs)]
+    let g = unsafe { &mut GAME };
+    let mut img = boot_image(c, g);
+    // The sampler's clock against CIA 2 (about 1.5 s of muted one-shots; no sampler, no music).
+    let player = talonhd::audio::player();
+    paging::page(paging::TUNE);
+    talonhd::audio::tune::calibrate(c, player);
+    #[cfg(feature = "start-keel")]
+    {
+        g.world.scroll = (talonhd::midboss::ARRIVE as u32 - 20) << 8;
+        g.world.track_base = 1_000_000;
+    }
+    #[cfg(feature = "start-boss")]
+    {
+        g.world.scroll = (talonhd::astrolabe::HOLD as u32 - 10) << 8;
+        g.campanile.state = talonhd::campanile::GONE;
+    }
+    boot_irq(c, g);
+    #[allow(static_mut_refs)]
+    let sprites = unsafe { &mut SPRITES };
     let mut human = false;
     let mut shown_palette = img.palette;
     // Ever touched: from then on the frames are no longer the host's attract-mode replay.
     let mut touched = false;
     let mut back = 1usize;
     let mut flipped_at = micros(c);
+    // One level's image at a time: its music and an empty sprite cache (the common frames are rendered
+    // under each stage's light), then its frames until the step reaches another level (a stage clear, or
+    // a game over back to the first), whose image is loaded before anything is drawn from it.
+    #[cfg(feature = "bench")]
+    let mut benched = false;
     loop {
-        let buf = BUFFERS[back];
-        let start = micros(c);
-        #[cfg(feature = "raster-bars")]
-        c.poke(0xD020, 2);
-        let n = game::scene(g, sprites);
-        let scroll = game::view(g, &img);
-        // The animated level's frame for this tick.
-        img.background = render::background_at(c, &img, g.ticks as u8);
-        // render::render_frame, split so the background can be timed.
-        render::restore_background(c, &img, buf, scroll);
-        let bg = micros(c).wrapping_sub(start);
-        unsafe {
-            PROFILE = [0; 3];
-            LAST_MARK = micros(c);
+        start_music(c, player, img.music);
+        render::reset_sprite_cache(c);
+        // Feature `bench`: the renderer's unit costs, measured after a full boot (HUD IRQ and music
+        // running, as in play), once.
+        #[cfg(feature = "bench")]
+        if !benched {
+            benched = true;
+            // The bench lives in the ACE phase (BOOT is full).
+            paging::page(paging::ACE);
+            unsafe { bench_all() };
         }
-        render::sort_by_z(&mut sprites[..n]);
-        for s in sprites[..n].iter() {
-            draw_sprite(c, &img, buf, s, scroll.fine);
-        }
-        status_poke16(c, status::BACKGROUND_US, bg);
-        for i in 0..3 {
-            #[allow(static_mut_refs)]
-            let v = unsafe { PROFILE[i] };
-            status_poke16(c, status::PROFILE_US + 2 * i as u16, v);
-        }
-
-        #[cfg(feature = "raster-bars")]
-        c.poke(0xD020, img.border);
-        let took = micros(c).wrapping_sub(start);
-        status_poke16(c, status::RENDER_US, took);
-
-        // One flip per vertical blank: if we flipped less than a blank's
-        // length ago, first wait for the beam to reach the picture.
-        if micros(c).wrapping_sub(flipped_at) < 8000 {
-            while in_vblank(c) {}
-        }
-        while !in_vblank(c) {}
-
-        c.poke(layout::STATUS + status::FLIPPING, 1);
-        // present() also turns the display on: $D011 = bitmap, 24 rows, YSCROLL.
-        render::present(c, buf, scroll);
-        flipped_at = micros(c);
-        render::hud_update(c, &game::hud_state(g));
-        // Keep the music ring ahead of the sampler (I/O is in). Music is not game state, so its cost
-        // follows the frame's: a frame whose render took over AUDIO_HEAVY_US decodes a little less than
-        // it plays, light frames make it up (`audio::service`); the ring's ~1.9 s lead covers the gap.
-        #[cfg(feature = "timing")]
-        let t_audio = micros(c);
-        paging::page(paging::AUDIO);
-        talonhd::audio::service(c, player, took < AUDIO_HEAVY_US);
-        #[cfg(feature = "timing")]
-        {
-            let d = micros(c).wrapping_sub(t_audio);
-            status_poke16(c, status::AUDIO_US, d);
-        }
-        // The boss's phase 2 recolors `hot` (a color RAM fill), in step with the frame just shown.
-        let pal = game::palette(g, img.palette);
-        if pal != shown_palette {
-            render::set_palette(c, pal);
-            shown_palette = pal;
-        }
-        c.poke(layout::STATUS + status::FRONT, back as u8);
-        status_poke16(c, status::SHOWN_T, g.ticks as u16);
-        c.poke(layout::STATUS + status::HUMAN, touched as u8);
-        c.poke(layout::STATUS + status::FLIPPING, 0);
-        c.poke(layout::STATUS + status::MAGIC, layout::STATUS_MAGIC);
-
-        back ^= 1;
-        #[cfg(feature = "timing")]
-        let t_step = micros(c);
-        if c.peek(layout::STATUS + status::HOLD) == 0 {
-            // One sim tick per displayed frame. The stick takes over from the autopilot when touched
-            // and hands back at GAME OVER.
-            let stick = read_input(c);
-            if stick != 0 {
-                human = true;
-                touched = true;
+        while g.clear.level == img.level {
+            let buf = BUFFERS[back];
+            let start = micros(c);
+            #[cfg(feature = "raster-bars")]
+            c.poke(0xD020, 2);
+            let n = game::scene(g, sprites);
+            let scroll = game::view(g, &img);
+            // The animated level's frame for this tick.
+            img.background = render::background_at(c, &img, g.ticks as u8);
+            // render::render_frame, split so the background can be timed.
+            render::restore_background(c, &img, buf, scroll);
+            let bg = micros(c).wrapping_sub(start);
+            unsafe {
+                PROFILE = [0; 3];
+                LAST_MARK = micros(c);
             }
-            if g.world.state == GAME_OVER {
-                human = false;
+            render::sort_by_z(&mut sprites[..n]);
+            for s in sprites[..n].iter() {
+                draw_sprite(c, &img, buf, s, scroll.fine);
             }
-            // The step runs with I/O banked out: the boss code lives in the RAM under $D000 (it and
-            // everything it calls are pure computation; the HUD IRQ banks I/O in for itself).
-            c.poke(0x0001, 0x34);
-            let input = if human {
-                stick
-            } else {
-                // ACE, one slice (one overlay) a tick: see (ATTRACT), the lookahead (MOTOR), think
-                // (ACE). The Mind is worked on in SEG_BUF (the renderer's scratch, idle during the
-                // step) and parked in the REU between ticks.
-                // SAFETY: SEG_BUF is ours during the step; Mind holds plain integers.
-                let mind = unsafe { &mut *(layout::SEG_BUF as *mut talonhd::ace::Mind) };
-                let slice = g.ace.slice();
-                if slice != 0 {
-                    mind_dma(c, false);
+            status_poke16(c, status::BACKGROUND_US, bg);
+            for i in 0..3 {
+                #[allow(static_mut_refs)]
+                let v = unsafe { PROFILE[i] };
+                status_poke16(c, status::PROFILE_US + 2 * i as u16, v);
+            }
+
+            #[cfg(feature = "raster-bars")]
+            c.poke(0xD020, img.border);
+            let took = micros(c).wrapping_sub(start);
+            status_poke16(c, status::RENDER_US, took);
+
+            // One flip per vertical blank: if we flipped less than a blank's
+            // length ago, first wait for the beam to reach the picture.
+            if micros(c).wrapping_sub(flipped_at) < 8000 {
+                while in_vblank(c) {}
+            }
+            while !in_vblank(c) {}
+
+            c.poke(layout::STATUS + status::FLIPPING, 1);
+            // present() also turns the display on: $D011 = bitmap, 24 rows, YSCROLL.
+            render::present(c, buf, scroll);
+            flipped_at = micros(c);
+            render::hud_update(c, &game::hud_state(g));
+            // Keep the music ring ahead of the sampler (I/O is in). Music is not game state, so its cost
+            // follows the frame's: a frame whose render took over AUDIO_HEAVY_US decodes a little less than
+            // it plays, light frames make it up (`audio::service`); the ring's ~1.9 s lead covers the gap.
+            #[cfg(feature = "timing")]
+            let t_audio = micros(c);
+            paging::page(paging::AUDIO);
+            talonhd::audio::service(c, player, took < AUDIO_HEAVY_US);
+            #[cfg(feature = "timing")]
+            {
+                let d = micros(c).wrapping_sub(t_audio);
+                status_poke16(c, status::AUDIO_US, d);
+            }
+            // The boss's phase 2 recolors `hot` (a color RAM fill), in step with the frame just shown.
+            let pal = game::palette(g, img.palette);
+            if pal != shown_palette {
+                render::set_palette(c, pal);
+                shown_palette = pal;
+            }
+            c.poke(layout::STATUS + status::FRONT, back as u8);
+            status_poke16(c, status::SHOWN_T, g.ticks as u16);
+            c.poke(layout::STATUS + status::HUMAN, touched as u8);
+            c.poke(layout::STATUS + status::FLIPPING, 0);
+            c.poke(layout::STATUS + status::MAGIC, layout::STATUS_MAGIC);
+
+            back ^= 1;
+            #[cfg(feature = "timing")]
+            let t_step = micros(c);
+            if c.peek(layout::STATUS + status::HOLD) == 0 {
+                // One sim tick per displayed frame. The stick takes over from the autopilot when touched
+                // and hands back at GAME OVER.
+                let stick = read_input(c);
+                if stick != 0 {
+                    human = true;
+                    touched = true;
                 }
-                let input = if slice == 0 {
-                    paging::page(paging::ATTRACT);
-                    talonhd::ace::see(g, mind)
-                } else if slice == 1 {
-                    paging::page(paging::MOTOR);
-                    talonhd::ace::motor(g, mind)
+                if g.world.state == GAME_OVER {
+                    human = false;
+                }
+                // The step runs with I/O banked out: the boss code lives in the RAM under $D000 (it and
+                // everything it calls are pure computation; the HUD IRQ banks I/O in for itself).
+                c.poke(0x0001, 0x34);
+                let input = if human {
+                    stick
                 } else {
-                    paging::page(paging::ACE);
-                    talonhd::ace::think(g, mind)
+                    // ACE, one slice (one overlay) a tick: see (ATTRACT), the lookahead (MOTOR), think
+                    // (ACE). The Mind is worked on in SEG_BUF (the renderer's scratch, idle during the
+                    // step) and parked in the REU between ticks.
+                    // SAFETY: SEG_BUF is ours during the step; Mind holds plain integers.
+                    let mind = unsafe { &mut *(layout::SEG_BUF as *mut talonhd::ace::Mind) };
+                    let slice = g.ace.slice();
+                    if slice != 0 {
+                        mind_dma(c, false);
+                    }
+                    let input = if slice == 0 {
+                        paging::page(paging::ATTRACT);
+                        talonhd::ace::see(g, mind)
+                    } else if slice == 1 {
+                        paging::page(paging::MOTOR);
+                        talonhd::ace::motor(g, mind)
+                    } else {
+                        paging::page(paging::ACE);
+                        talonhd::ace::think(g, mind)
+                    };
+                    if g.ace.slice() != 0 {
+                        mind_dma(c, true);
+                    }
+                    input
                 };
-                if g.ace.slice() != 0 {
-                    mind_dma(c, true);
-                }
-                input
-            };
-            g.step(input);
-            c.poke(0x0001, 0x35);
+                g.step(input);
+                c.poke(0x0001, 0x35);
+            }
+            #[cfg(feature = "timing")]
+            {
+                let d = micros(c).wrapping_sub(t_step);
+                status_poke16(c, status::STEP_US, d);
+            }
         }
-        #[cfg(feature = "timing")]
-        {
-            let d = micros(c).wrapping_sub(t_step);
-            status_poke16(c, status::STEP_US, d);
-        }
+        paging::page(paging::TUNE);
+        load_level(c, g, img.level);
+        paging::page(paging::BOOT);
+        img = level_image(c, g);
     }
 }
 

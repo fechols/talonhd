@@ -43,7 +43,7 @@ fn main() {
     let mut m = Machine::new(&image);
     let img = render::read_image(&mut m).unwrap();
     let mut c = Counting { m: &mut m, links: 0, other_dmas: 0, dma_bytes: 0, blends: 0, io_writes: 0, in_column: false };
-    let g = game::replay_level(img.level, t as u32);
+    let g = game::replay_level(img.level, talonhd::clear::LAST_LEVEL, t as u32);
     let mut sprites = [render::Sprite::default(); game::INSTANCES];
     let n = game::scene(&g, &mut sprites);
     let scroll = game::view(&g, &img);

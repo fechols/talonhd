@@ -21,6 +21,8 @@ rust-columns = []
 start-keel = []
 # Debug (with the S2 image): the attract game starts just before the ASTROLABE, the CAMPANILE behind it.
 start-boss = []
+# Debug: boot S1's image and load S2's at once (the per-level load, `talonhd::uci`; emu64 `--level-dir`).
+start-s2 = []
 # Show render time as a border color bar.
 raster-bars = []
 # Time the frame's music service and game step into the status block (AUDIO_US, STEP_US).

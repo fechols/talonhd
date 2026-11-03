@@ -67,7 +67,7 @@ SECTIONS {
     } >hiram AT>hiload
     .phase.boot : {
         *(.text._ZN11talonhd_c6414install_phases*)
-        *(.text.bench .rodata.bench_table)
+        *(.text._ZN11talonhd_c6410boot_image*)
         *(.text._ZN7talonhd4game4Game5reset* .text._ZN7talonhd4game4Game8reset_at*)
         *(.text._ZN7talonhd6render8hud_init* .text._ZN7talonhd6render10read_image* .text._ZN7talonhd6render12verify_image* .text._ZN7talonhd6render16invalidate_image*)
     } >ph_boot AT>hiload
@@ -111,6 +111,8 @@ SECTIONS {
     .phase.ace : {
         *(.text._ZN7talonhd3ace*)
         *(.rodata._ZN7talonhd3ace*)
+        /* Feature `bench` (calls nothing): BOOT has no room for it since the boot code moved there. */
+        *(.text.bench .rodata.bench_table)
     } >ph_ace AT>phimg
     .phase.midboss : {
         *(.text._ZN7talonhd7midboss*)
@@ -119,6 +121,7 @@ SECTIONS {
     .phase.tune : {
         *(.text._ZN7talonhd5audio4tune*)
         *(.rodata._ZN7talonhd5audio4tune*)
+        *(.text._ZN11talonhd_c648boot_irq* .text._ZN11talonhd_c6410load_level* .text._ZN7talonhd3uci* .rodata._ZN7talonhd3uci* .rodata.uci)
     } >ph_tune AT>phimg
     .phase.audio : {
         *(.phase.audio.kernel)

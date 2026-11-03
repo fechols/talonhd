@@ -72,6 +72,17 @@ fn write(path: &Path, data: &[u8]) -> Result<(), String> {
     std::fs::write(path, data).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The image a replayed game shows: `path`'s, or, once the game has reached another level (a C64 loads
+/// that level's image, `talonhd::uci`), that level's file beside it.
+fn image_for(path: &Path, loaded: (Machine, render::Image), g: &game::Game) -> Result<(Machine, render::Image), String> {
+    if g.clear.level == loaded.1.level {
+        return Ok(loaded);
+    }
+    let name = std::str::from_utf8(talonhd::uci::LEVEL_FILES[g.clear.level as usize]).unwrap();
+    println!("the replay is on level {}: {name}", g.clear.level);
+    load_image(&path.with_file_name(name))
+}
+
 fn load_image(path: &Path) -> Result<(Machine, render::Image), String> {
     let data = read(path)?;
     let mut m = Machine::new(&data);
@@ -223,15 +234,15 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
     let mut m = Machine::new(&image);
     let img = render::read_image(&mut m).unwrap();
     // Attract-mode ticks: the first frames, WASP strings, a GANNET's dive and bombs, the docks, the boss.
-    // As a C64 booted with this image: S1, and S1 again after its clear.
+    // As a C64 booted with this image that cannot load another (`crate::uci`): S1, and S1 again after its clear.
     let mut g = game::Game::new();
-    g.reset_at(0);
+    g.reset_at(0, 0);
     let mut mind = talonhd::ace::Mind::new();
     // Then probed ticks: a camera shake (the TALON just hit), 200 ticks into the GANTRY QUEEN fight, and
     // phase 2 if the autopilot gets there.
     let mut ticks = vec![0u32, 1, 2, 3, 150, 450, 900, 1700, 3300, 3420, 5000, 7000];
     let mut probe = game::Game::new();
-    probe.reset_at(0);
+    probe.reset_at(0, 0);
     let mut probe_mind = talonhd::ace::Mind::new();
     let (mut shake, mut fight, mut phase2, mut keel) = (None, None, None, None);
     // The stage clear: the tally counting, the walk, the next stage's card, play as the PEREGRINE.
@@ -365,11 +376,11 @@ fn cmd_bake_s2(args: &Args) -> Result<(), String> {
     let img = render::read_image(&mut m).unwrap();
     assert_eq!(img.level, 1);
     let mut g = game::Game::new();
-    g.reset_at(1);
+    g.reset_at(1, 1);
     let mut mind = talonhd::ace::Mind::new();
     let mut ticks: Vec<u32> = vec![0, 1, 2, 3, 700, 1300, 1900, 2500, 3200, 3900, 4600, 5300, 6000, 6700, 7400, 8100, 8800, 9500, 10_200];
     let mut probe = game::Game::new();
-    probe.reset_at(1);
+    probe.reset_at(1, 1);
     let mut probe_mind = talonhd::ace::Mind::new();
     let mut shake = None;
     // The CAMPANILE: its fight, a chime (`hot` lit), phase 2 with the hub open, the crown shattering.
@@ -464,11 +475,14 @@ fn check(m: &Machine, buf: layout::Buffer, want: &reference::Expected) -> Result
 
 fn cmd_preview(args: &Args) -> Result<(), String> {
     let default = if args.num("--stage", 1)? == 2 { "dist/talonhd_s2.reu" } else { "dist/talonhd.reu" };
-    let (mut m, img) = load_image(&args.path("--reu", default))?;
+    let path = args.path("--reu", default);
+    let (m, img) = load_image(&path)?;
     let t = args.num("--t", 0)?;
     let out = args.path("--out", "output/preview.png");
-    // The attract mode of a C64 booted with this image (its level).
-    let g = game::replay_level(img.level, t as u32);
+    // The attract mode of a C64 booted with this image (its level), loading up to level `--top`.
+    let top = args.num("--top", talonhd::clear::LAST_LEVEL as u16)? as u8;
+    let g = game::replay_level(img.level, top, t as u32);
+    let (mut m, img) = image_for(&path, (m, img), &g)?;
     let scroll = model::render_game(&mut m, &img, &g, BUFFERS[0]);
     png::save(&out, 320, layout::VISIBLE as u32, &m.visible_with_hud(BUFFERS[0], img.palette.d021, scroll.fine))?;
     println!("t={t}: {:?}", m.stats);
@@ -478,7 +492,8 @@ fn cmd_preview(args: &Args) -> Result<(), String> {
 /// Compare a memory dump of a paused C64U (see `tools/c64u.py dump`) with the
 /// model's rendering of the frame it reports as displayed.
 fn cmd_compare(args: &Args) -> Result<(), String> {
-    let (mut m, img) = load_image(&args.path("--reu", "dist/talonhd.reu"))?;
+    let path = args.path("--reu", "dist/talonhd.reu");
+    let (m, img) = load_image(&path)?;
     let dump = PathBuf::from(args.opt("--dump").ok_or("--dump DIR required")?);
     let st = read(&dump.join("status.bin"))?;
     if st[status::MAGIC as usize] != layout::STATUS_MAGIC {
@@ -493,7 +508,9 @@ fn cmd_compare(args: &Args) -> Result<(), String> {
     if st[status::HUMAN as usize] != 0 {
         return Err("a player has taken over: only the attract mode replays on the host".into());
     }
-    let g = game::replay_level(img.level, t as u32);
+    // The levels the C64 can reach (`status::TOP`: 0 in a dump from before it, meaning no load).
+    let g = game::replay_level(img.level, st[status::TOP as usize], t as u32);
+    let (mut m, img) = image_for(&path, (m, img), &g)?;
     println!("tick {t}: attract-mode replay (score {}, lives {}, stage line {})", g.world.score, g.world.lives, g.world.scroll_lines());
     let scroll: Scroll = model::render_game(&mut m, &img, &g, front);
 

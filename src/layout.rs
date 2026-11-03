@@ -109,6 +109,9 @@ pub mod status {
     pub const FLIPPING: u16 = 1;
     /// u8: index of the buffer currently displayed.
     pub const FRONT: u16 = 2;
+    /// u8: the last level this C64 can reach (`Clear::top`: `clear::LAST_LEVEL` when it loads the levels'
+    /// images, else its booted level), for `compare`'s replay.
+    pub const TOP: u16 = 3;
     /// u16: demo time of the displayed frame.
     pub const SHOWN_T: u16 = 4;
     /// u16: microseconds (CIA ticks) spent rendering the last frame.

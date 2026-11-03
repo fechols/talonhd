@@ -4,6 +4,7 @@ PRG, and dump the displayed frame for `talonhd compare`.
 
     python tools/c64u.py config
     python tools/c64u.py upload-reu dist/talonhd.reu
+    python tools/c64u.py upload-levels [--dir /Usb0/talonhd]   # the per-level load's image files (FTP)
     python tools/c64u.py run dist/talonhd.prg
     python tools/c64u.py dump dist/dump [--hold]
     python tools/c64u.py status
@@ -12,6 +13,7 @@ Host from --host or C64U_HOST; password (if any) from C64U_PASSWORD.
 REST + DMA-socket code adapted from impact/tools/c64u_device.py (MIT).
 """
 import argparse
+import ftplib
 import json
 import os
 from pathlib import Path
@@ -37,6 +39,8 @@ CONFIG = {
         "REU Size": "16 MB",
         # The sampler the music plays on (src/audio.rs).
         "Map Ultimate Audio $DF20-DFFF": "Enabled",
+        # The per-level load (src/uci.rs): the PRG reads the next level's image file into the REU.
+        "Command Interface": "Enabled",
     },
     # As ../sueme64's validated mix: the sampler +6 dB, its voices panned apart.
     "Audio Mixer": {
@@ -123,6 +127,33 @@ class Device:
             receive(sock, receive(sock, 1)[0])
 
 
+# The level images, in level order (`uci::LEVEL_FILES`), and the device directory the PRG loads them from
+# (`uci::LEVEL_DIR`: `TALONHD_DIR` at build time).
+LEVEL_FILES = ['talonhd.reu', 'talonhd_s2.reu']
+LEVEL_DIR = os.environ.get('TALONHD_DIR', '/Usb0/talonhd')
+
+
+def upload_levels(host, folder, files):
+    """Put the level images in `folder` on the device over its FTP server, creating the folder."""
+    with ftplib.FTP(host, timeout=60) as ftp:
+        ftp.login('anonymous', os.environ.get('C64U_PASSWORD', ''))
+        ftp.cwd('/')
+        for part in [p for p in folder.split('/') if p]:
+            try:
+                ftp.cwd(part)
+            except ftplib.error_perm:
+                ftp.mkd(part)
+                ftp.cwd(part)
+        for f in files:
+            t0 = time.time()
+            with open(f, 'rb') as fh:
+                ftp.storbinary(f'STOR {Path(f).name}', fh, blocksize=65536)
+            size = ftp.size(Path(f).name)
+            if size != Path(f).stat().st_size:
+                raise RuntimeError(f'{f}: {size} bytes on the device, {Path(f).stat().st_size} here')
+            print(f'{f} -> {folder}/{Path(f).name}: {size} bytes in {time.time() - t0:.1f}s')
+
+
 def status(dev):
     st = dev.read(STATUS, STATUS_LEN)
     return dict(magic=st[0], flipping=st[1], front=st[2],
@@ -139,6 +170,8 @@ def main():
     sub = ap.add_subparsers(dest='cmd', required=True)
     sub.add_parser('config')
     p = sub.add_parser('upload-reu'); p.add_argument('file')
+    p = sub.add_parser('upload-levels'); p.add_argument('--dir', default=LEVEL_DIR)
+    p.add_argument('--from', dest='src', default='dist')
     p = sub.add_parser('run'); p.add_argument('prg')
     p = sub.add_parser('dump'); p.add_argument('out'); p.add_argument('--hold', action='store_true')
     p = sub.add_parser('hold'); p.add_argument('value', type=int)
@@ -156,6 +189,8 @@ def main():
         t0 = time.time()
         dev.write_reu(data)
         print(f'uploaded {len(data)} bytes to REU 0 in {time.time() - t0:.1f}s')
+    elif args.cmd == 'upload-levels':
+        upload_levels(dev.host, args.dir, [str(Path(args.src) / f) for f in LEVEL_FILES])
     elif args.cmd == 'run':
         # Clear the previous image's magic: the PRG starts on an image already in the REU when it is
         # complete and stamped for it, and `upload-reu` follows `run` here.
