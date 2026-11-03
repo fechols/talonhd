@@ -254,15 +254,7 @@ fn gather(g: &Game, px: i16, py: i16, half: i16, t: &mut Threats) -> bool {
         }
         i += 1;
     }
-    // A HATCH launches WASPs from its doors: never loiter over one (it scrolls down with the ground).
-    let mut i = 0;
-    while i < ground::UNITS {
-        let u = &g.ground.units[i];
-        if u.kind == ground::HATCH && u.state == ground::LIVE && near(u.px, u.py, px, py) {
-            add(t, u.px << 6, u.py << 6, 0, 32, (WASP_HALF_W << 6) + half, (WASP_HALF_H << 6) + half);
-        }
-        i += 1;
-    }
+    // (Ground units are `motor`'s: `units`.)
     let mut diving = false;
     let mut i = 0;
     while i < GANNETS {
@@ -554,6 +546,37 @@ pub fn see(g: &mut Game, m: &mut Mind) -> u8 {
     g.ace.held()
 }
 
+/// MOTOR phase, after the seen threats are brought up to now: the ground units, as they are this tick. A
+/// HATCH (S1) or ROOF HATCH (S2) launches WASPs from its doors: never loiter over one (it scrolls down
+/// with the ground). S2's PIKEs and KESTRELs fly into the ship: along their velocity (Q4 in `base`, `n`).
+#[inline(never)]
+fn units(g: &Game, px: i16, py: i16, t: &mut Threats) {
+    let half = HITBOX_HALF[g.world.hitbox_step()] << 6;
+    let mut i = 0;
+    while i < ground::UNITS {
+        let u = &g.ground.units[i];
+        let air = u.kind == ground::PIKE || u.kind == ground::KESTREL;
+        if u.state == ground::LIVE && t.n < MAX_THREATS && near(u.px, u.py, px, py) && (air || u.kind == ground::HATCH || u.kind == ground::ROOF) {
+            let j = t.n;
+            t.x[j] = u.px << 6;
+            t.y[j] = u.py << 6;
+            if air {
+                t.vx[j] = (u.base as i8 as i16) << 2;
+                t.vy[j] = (u.n as i8 as i16) << 2;
+                t.rw[j] = (16 << 6) + half;
+                t.rh[j] = (8 << 6) + half;
+            } else {
+                t.vx[j] = 0;
+                t.vy[j] = 32;
+                t.rw[j] = (WASP_HALF_W << 6) + half;
+                t.rh[j] = (WASP_HALF_H << 6) + half;
+            }
+            t.n = j + 1;
+        }
+        i += 1;
+    }
+}
+
 /// MOTOR phase: every stick move's lookahead (clearance, end point) and its stick bits, into `m`; the
 /// held stick.
 #[inline(never)]
@@ -592,6 +615,8 @@ pub fn motor(g: &mut Game, m: &mut Mind) -> u8 {
         k += 1;
     }
     t.n = kept;
+    units(g, px, py, t);
+    let w = &g.world;
     let speed = w.gauge.speed as usize;
     let ship = Ship {
         x: px << 6,
@@ -816,6 +841,10 @@ mod tests {
             was = g.world.state;
             keel |= g.midboss.state == crate::midboss::SINKING;
             queen |= g.boss.state == crate::boss::DYING;
+        }
+        // Beaten, then promoted: the stage clear runs and stage 2 starts.
+        if queen {
+            assert!(g.clear.stage == 1 || g.clear.holds(), "the stage clear follows the GANTRY QUEEN");
         }
         (deaths.len() as u16, g.world.score, g.world.kills, deaths, keel, queen)
     }

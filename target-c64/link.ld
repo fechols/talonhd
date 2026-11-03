@@ -44,6 +44,10 @@ MEMORY {
     ph_tune (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
     ph_ace (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
     ph_motor (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
+    ph_stage (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
+    ph_s2 (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
+    ph_s2gnd (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
+    ph_s2air (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
     /* Load addresses of every phase but BOOT: outside the PRG (OUTPUT_FORMAT writes ram and hiload
      * only). scripts/build-target.sh extracts them to dist/phases/<name>.bin; bake puts them in the
      * level REU image, and boot copies them to the phase bank (main.rs install_phases). */
@@ -63,7 +67,7 @@ SECTIONS {
     .phase.boot : {
         *(.text._ZN11talonhd_c6414install_phases*)
         *(.text.bench .rodata.bench_table)
-        *(.text._ZN7talonhd4game4Game5reset*)
+        *(.text._ZN7talonhd4game4Game5reset* .text._ZN7talonhd4game4Game8reset_at*)
         *(.text._ZN7talonhd6render8hud_init* .text._ZN7talonhd6render10read_image* .text._ZN7talonhd6render12verify_image* .text._ZN7talonhd6render16invalidate_image*)
     } >ph_boot AT>hiload
     .lowtext : {
@@ -100,7 +104,7 @@ SECTIONS {
         *(.rodata._ZN7talonhd3ace6choose*)
     } >ph_attract AT>phimg
     .phase.motor : {
-        *(.text._ZN7talonhd3ace5motor* .text._ZN7talonhd3ace6assess*)
+        *(.text._ZN7talonhd3ace5motor* .text._ZN7talonhd3ace6assess* .text._ZN7talonhd3ace5units*)
         *(.rodata._ZN7talonhd3ace2MX* .rodata._ZN7talonhd3ace2MY*)
     } >ph_motor AT>phimg
     .phase.ace : {
@@ -124,6 +128,22 @@ SECTIONS {
         *(.text._ZN7talonhd6ground*)
         *(.rodata._ZN7talonhd6ground*)
     } >ph_ground AT>phimg
+    .phase.stage : {
+        *(.text._ZN7talonhd5clear*)
+        *(.rodata._ZN7talonhd5clear*)
+    } >ph_stage AT>phimg
+    .phase.s2 : {
+        *(.text._ZN7talonhd6stage2*)
+        *(.rodata._ZN7talonhd6stage2*)
+    } >ph_s2 AT>phimg
+    .phase.s2gnd : {
+        *(.text._ZN7talonhd4gnd2*)
+        *(.rodata._ZN7talonhd4gnd2*)
+    } >ph_s2gnd AT>phimg
+    .phase.s2air : {
+        *(.text._ZN7talonhd4air2*)
+        *(.rodata._ZN7talonhd4air2*)
+    } >ph_s2air AT>phimg
 }
 __phase_boot_load_start = LOADADDR(.phase.boot);
 __phase_boot_size = SIZEOF(.phase.boot);

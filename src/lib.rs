@@ -11,11 +11,14 @@
 #![cfg_attr(not(feature = "host"), no_std)]
 
 pub mod ace;
+pub mod air2;
 pub mod audio;
 pub mod boss;
+pub mod clear;
 pub mod demo;
 pub mod format;
 pub mod game;
+pub mod gnd2;
 pub mod ground;
 pub mod hud;
 pub mod hw;
@@ -24,13 +27,18 @@ pub mod paging;
 pub mod layout;
 pub mod render;
 pub mod sim;
+pub mod stage2;
 
 #[cfg(feature = "host")]
 pub mod bake;
 #[cfg(feature = "host")]
 pub mod encode;
 #[cfg(feature = "host")]
+pub mod font;
+#[cfg(feature = "host")]
 pub mod hand;
+#[cfg(feature = "host")]
+pub mod hand_s2;
 #[cfg(feature = "host")]
 pub mod mesh;
 #[cfg(feature = "host")]
@@ -47,3 +55,5 @@ pub mod raster3d;
 pub mod reference;
 #[cfg(feature = "host")]
 pub mod s1;
+#[cfg(feature = "host")]
+pub mod s2;

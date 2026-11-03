@@ -14,7 +14,7 @@
 //! so the fight replays exactly like the rest of the game. Integer math only; positions come from the
 //! same `demo::queen` placement the renderer draws.
 
-use crate::demo::{self, BOSS_FRAME, BOSS_SIZE, PANO_PERIOD, QUEEN_SPRITES, QUEEN_WRECK_FRAME, QUEEN_WRECK_X};
+use crate::demo::{self, BOSS_FRAME, BOSS_SIZE, QUEEN_SPRITES, QUEEN_WRECK_FRAME, QUEEN_WRECK_X};
 use crate::render::{Palette, Sprite};
 use crate::sim::actors::{B_ROUND, SCROLL_Q8};
 use crate::sim::world::*;
@@ -146,7 +146,7 @@ use crate::ground::burst;
 
 /// Where she is this tick: her sprites as the renderer places them (parts 0-5, body 6).
 pub fn placement(b: &Boss, w: &World, out: &mut [Sprite]) {
-    let lines = (w.scroll_lines() % PANO_PERIOD as u32) as u16;
+    let lines = w.scroll_lines() as u16;
     let lift = if b.state == ARRIVING { ((HOVER - lines.min(HOVER)) * 2) as i16 } else { -b.sink };
     demo::queen(w.tick as u16, lift, out);
 }
@@ -228,7 +228,7 @@ impl Boss {
     /// One tick, after the world's.
     #[inline(never)]
     pub fn step(&mut self, w: &mut World) {
-        let lines = (w.scroll_lines() % PANO_PERIOD as u32) as u16;
+        let lines = w.scroll_lines() as u16;
         if lines < ARRIVE {
             // A new pass of the stage (or a new game): she is waiting again.
             *self = Boss::default();

@@ -127,7 +127,12 @@ impl ModelFile {
             }
         };
         let yaws: Vec<f64> = match get("yaw") {
-            Some(n) if n > 1.0 => (0..n as usize).map(|i| i as f64 * 2.0 * PI / n).collect(),
+            // `yaw_span_deg`: samples over a symmetry's span instead of a full turn (a crown with 8
+            // points needs only 45 degrees).
+            Some(n) if n > 1.0 => {
+                let span = get("yaw_span_deg").map_or(2.0 * PI, f64::to_radians);
+                (0..n as usize).map(|i| i as f64 * span / n).collect()
+            }
             _ => vec![0.0],
         };
         let rolls = span(get("roll"), get("roll_max_deg"));
@@ -144,8 +149,13 @@ impl ModelFile {
     }
 
     pub fn render_all(&self) -> Vec<SpriteImage> {
+        self.render_all_lit(&raster3d::MORNING)
+    }
+
+    /// Every orientation under a stage's light.
+    pub fn render_all_lit(&self, light: &raster3d::Light) -> Vec<SpriteImage> {
         let view = View::centered(self.canvas.0, self.canvas.1, 1.0);
-        self.orientations().into_iter().map(|o| raster3d::render(&self.mesh, o, view)).collect()
+        self.orientations().into_iter().map(|o| raster3d::render_lit(&self.mesh, o, view, light)).collect()
     }
 }
 

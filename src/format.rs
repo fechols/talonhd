@@ -106,6 +106,9 @@ pub mod header {
     pub const PHASE_LENS: usize = 48;
     /// u16: the phases' stamp (`paging::stamp`); the PRG carries the same one (patched in by the build).
     pub const PHASE_STAMP: usize = 34;
+    /// u8: the level this image holds (0 = S1 BREAKWATER, 1 = S2 TERRACES): its frames, units and
+    /// fights (`clear::Clear::level`). The last byte of `PHASE_LENS` (phases are at most 15).
+    pub const LEVEL: usize = 63;
 }
 
 /// Frame directory record (one per frame, `FRAME_RECORD` bytes).

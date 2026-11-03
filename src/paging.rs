@@ -36,9 +36,19 @@ pub const TUNE: u8 = 6;
 pub const ACE: u8 = 7;
 /// The attract pilot's lookahead (`ace::motor`), paged after ATTRACT's `ace::see`.
 pub const MOTOR: u8 = 8;
-pub const PHASES: u8 = 9;
+/// The stage clear and the promotion (`clear::Clear::step`), paged from the boss's fall to the next
+/// stage's first line.
+pub const STAGE: u8 = 9;
+/// S2 TERRACES' waves (`stage2::waves`): paged while a placement is due or a WASP string releases.
+pub const S2: u8 = 10;
+/// S2's ground units (`gnd2::step`), paged while any is out.
+pub const S2GND: u8 = 11;
+/// S2's PIKEs, KESTRELs and shells (`air2::step`), paged while any is out.
+pub const S2AIR: u8 = 12;
+pub const PHASES: u8 = 13;
+const _: () = assert!(PHASES <= 15, "the header's last phase-length byte is the level (`format::header::LEVEL`)");
 /// Phase names (`dist/phases/<name>.bin`, `.phase.<name>` in `link.ld`), in id order.
-pub const NAMES: [&str; PHASES as usize] = ["boss", "attract", "midboss", "boot", "ground", "audio", "tune", "ace", "motor"];
+pub const NAMES: [&str; PHASES as usize] = ["boss", "attract", "midboss", "boot", "ground", "audio", "tune", "ace", "motor", "stage", "s2", "s2gnd", "s2air"];
 
 /// The stamp tying a level image's phases to the PRG built with them: an additive checksum of every
 /// phase image but `BOOT`'s (`scripts/build-target.sh` patches it into the PRG; `bake` into the header).

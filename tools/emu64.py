@@ -236,7 +236,8 @@ def main():
         print(f'ran {cpu.flips} flips, {steps} instructions, no fault')
         print(f'soft stack: deepest write ${cpu.stack_low:04x} ({0xD000 - cpu.stack_low} bytes below $D000, '
               f'limit 464: the static frames end at $CE30)')
-        check_music(cpu, reu)
+        # The stage's cue: the image's level is header byte 63 (`format::header::LEVEL`).
+        check_music(cpu, reu, f'output/audio/cue.stage_s{reu[63] + 1}.preview.wav')
         return
     print('last instructions:')
     for pc in list(last)[-args.trace:]:

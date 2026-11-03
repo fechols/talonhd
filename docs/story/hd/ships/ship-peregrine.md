@@ -5,7 +5,7 @@ name = "PEREGRINE"
 prototype = 10
 stage = "stage.s2"
 status = "approved"
-revision = 3
+revision = 4
 crystal = "none"
 identity = "a slim long-range interceptor in cream and terracotta, a needle nose, cranked delta wings, a long dorsal spine, one big round exhaust"
 silhouette = "needle nose, cranked delta with a sharp kink at half span, dorsal spine ridge, single large round nozzle, small wingtip fins"
@@ -21,7 +21,7 @@ canvas = [32, 72]
 length_px = 70
 tris = 180
 orient = { roll = 9, roll_max_deg = 60 }
-ludo = { generator = "hero", rig = false, texture = "simple" }
+ludo = { generator = "hand", rig = false, texture = "none" }
 
 [[model.materials]]
 name = "hull"
@@ -72,3 +72,4 @@ Long and narrow where the TALON is broad: the first new shape tells the player t
 - Decision: approved (whole HD layer approved at once, "Approve all, start Ludo")
 - rev 2 (2026-10-31): canvas height raised to length_px + 2 (rev 1 canvases were shorter than the ships; a number error, no design change)
 - rev 3 (2026-10-31): hull floors 1 -> 2 (shadow side stops at solid dark; art-direction review of the TALON pilot)
+- rev 4 (2026-11-02): hand-built (`src/hand.rs` `peregrine`) instead of Ludo (user: "Hand model, TALON handling"); it flies with the TALON's speeds and hitbox until S2 brings its own handling

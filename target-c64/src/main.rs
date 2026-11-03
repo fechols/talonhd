@@ -314,7 +314,8 @@ pub extern "C" fn main() -> i16 {
     render::hud_init(c, &img);
     #[allow(static_mut_refs)]
     let g = unsafe { &mut GAME };
-    g.reset();
+    // On the level of the image in the REU: until the per-level load exists, the game stays on it.
+    g.reset_at(img.level);
     // The sampler's clock against CIA 2 (about 1.5 s of muted one-shots; no sampler, no music) and the
     // stage music's header.
     let player = talonhd::audio::player();

@@ -72,6 +72,11 @@ pub fn build_image(pano: &Panorama, frames: &[SpriteImage], border: u8) -> Resul
     build_level(pano, frames, border, &[], &[])
 }
 
+/// The level an image built by [`build_animated_level`] holds (`format::header::LEVEL`).
+pub fn set_level(image: &mut [u8], level: u8) {
+    image[header::LEVEL] = level;
+}
+
 /// Build one level's REU image with its stage music (a DLT5 asset, `crate::audio`; empty = none) and
 /// the C64 build's paged code phases (`paging::NAMES` order, `dist/phases`; empty = none).
 pub fn build_level(pano: &Panorama, frames: &[SpriteImage], border: u8, music: &[u8], phases: &[Vec<u8>]) -> Result<Vec<u8>, String> {

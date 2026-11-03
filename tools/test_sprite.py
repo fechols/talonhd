@@ -89,7 +89,8 @@ def reference(ram, reu, directory, frame, x, y):
 def main():
     cases = int(sys.argv[1]) if len(sys.argv) > 1 else 300
     prg = Path('dist/talonhd.prg').read_bytes()
-    image = Path('dist/talonhd.reu').read_bytes()
+    # Any level's image: python tools/test_sprite.py [cases] [image]
+    image = Path(sys.argv[2] if len(sys.argv) > 2 else 'dist/talonhd.reu').read_bytes()
     entry = symbol('dist/talonhd.elf', 'draw_sprite_asm')
     reu = bytearray(16 << 20)
     reu[:len(image)] = image

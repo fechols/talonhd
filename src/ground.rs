@@ -36,16 +36,31 @@ pub const SKIFF: u8 = 1;
 pub const PILLBOX: u8 = 2;
 pub const HATCH: u8 = 3;
 pub const CRAWLER: u8 = 4;
+/// S2 TERRACES' units (`crate::stage2`): ground-locked PIKEs on their rails, KESTRELs in the air, the
+/// rooftop and observatory units, S2's own PILLBOX, and the DOME MORTAR's shells in flight. Kinds from
+/// `PIKE` on draw from the stage block (`demo::S2_*`); S1's from `SKIFF_FRAME`.
+pub const PIKE: u8 = 5;
+pub const KESTREL: u8 = 6;
+pub const ROOF: u8 = 7;
+pub const BELL: u8 = 8;
+pub const MORTAR: u8 = 9;
+pub const PILLBOX2: u8 = 10;
+pub const SHELL: u8 = 11;
+/// Not a unit: a string of WASPs released from `Ground::strings` (`crate::stage2`).
+pub const WASPS2: u8 = 12;
 
-/// Units alive (or wrecked) at once.
+/// Units alive (or wrecked) at once (S2: and shells in flight).
 pub const UNITS: usize = 10;
+/// WASP strings being released at once (S2's waves).
+pub const STRINGS: usize = 2;
 
 /// `Unit::state`.
 pub const FREE: u8 = 0;
 pub const LIVE: u8 = 1;
 pub const WRECK: u8 = 2;
 
-/// Draw order: under the KEELBREAKER's hull (-2) and everything that flies.
+/// Draw order: under the KEELBREAKER's hull (-2) and everything that flies (`Z`: S2's PIKEs and KESTRELs
+/// fly with the WASPs, the mortar's shells above them).
 pub const Z_GROUND: i16 = -3;
 
 /// One authored unit: activated when the stage has travelled `at` lines; at world (`x`, `u`) moving
@@ -61,7 +76,7 @@ pub struct Placement {
     pub vu: i8,
 }
 
-const fn p(at: u16, kind: u8, x: i16, u: u16, vx: i8, vu: i8) -> Placement {
+pub(crate) const fn p(at: u16, kind: u8, x: i16, u: u16, vx: i8, vu: i8) -> Placement {
     assert!(x % 2 == 0 && x >= -32 && x <= 478);
     Placement { at, kind, x2: ((x + 32) / 2) as u8, u, vx, vu }
 }
@@ -73,7 +88,7 @@ impl Placement {
     }
 }
 /// A ground unit standing at (`x`, `u`), activated just before it scrolls in at the top.
-const fn st(kind: u8, x: i16, u: u16) -> Placement {
+pub(crate) const fn st(kind: u8, x: i16, u: u16) -> Placement {
     p(u - 232, kind, x, u, 0, 0)
 }
 
@@ -149,17 +164,33 @@ pub struct Unit {
     pub frame: u8,
 }
 
-const NO_UNIT: Unit = Unit { kind: 0, state: 0, mode: 0, hp: 0, t: 0, cool: 0, yaw: 0, base: 0, n: 0, id: 0, x: 0, u: 0, px: 0, py: 0, frame: 0 };
+pub const NO_UNIT: Unit = Unit { kind: 0, state: 0, mode: 0, hp: 0, t: 0, cool: 0, yaw: 0, base: 0, n: 0, id: 0, x: 0, u: 0, px: 0, py: 0, frame: 0 };
+
+/// A string of WASPs being released (S2): `left` to come, one every 10 ticks, from placement `rec`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Str {
+    pub left: u8,
+    pub timer: u8,
+    pub rec: u8,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ground {
     pub units: [Unit; UNITS],
     /// Next placement, the line it is due, the line of the last step (a smaller one: the stage looped
-    /// or a new game began) and how many units are out.
+    /// or a new game began) and how many units are out (S2: and strings releasing).
     pub next: u8,
     pub next_at: u16,
     pub last: u16,
     pub live: u8,
+    /// S2: WASP strings releasing, the pair of the last KESTREL shot down (its wingman's fall scores the
+    /// pair bonus), and how many PIKEs, KESTRELs and shells are out (`air2::step` is paged only then).
+    /// (S2 keeps `live` at 0: `stage2::run` decides its own paging.)
+    pub strings: [Str; STRINGS],
+    pub pair: u8,
+    pub air: u8,
+    /// S2: how many ground units (and wrecks) are out (`gnd2::step` is paged only then).
+    pub gnd: u8,
 }
 
 impl Default for Ground {
@@ -218,7 +249,7 @@ fn turn(yaw: u8, to: u8) -> u8 {
 /// 1.25 px/tick plus `boost` quarters (0: 1.25, 1: ~1.56, 2: ~1.88).
 #[inline(never)]
 #[cfg_attr(target_arch = "mos", unsafe(link_section = ".text.resident.ground_shoot"))]
-fn shoot(w: &mut World, x: i16, y: i16, k: u8, boost: u8) {
+pub(crate) fn shoot(w: &mut World, x: i16, y: i16, k: u8, boost: u8) {
     let (vx, vy) = DIRS[k as usize];
     let (bx, by) = ((vx >> 2) * boost as i8, (vy >> 2) * boost as i8);
     w.spawn_ebullet(B_ROUND, x + (vx >> 2) as i16, y + (vy >> 2) as i16, vx + bx, vy + by);
@@ -241,7 +272,7 @@ pub(crate) fn burst(w: &mut World, x: i16, y: i16) {
 /// Spend TWIN bolts that hit box (`c` ± `half`) (playfield px); returns the hits.
 #[inline(never)]
 #[cfg_attr(target_arch = "mos", unsafe(link_section = ".text.resident.ground_hits"))]
-fn hits(w: &mut World, c: (i16, i16), half: i16) -> u8 {
+pub(crate) fn hits(w: &mut World, c: (i16, i16), half: i16) -> u8 {
     let mut n = 0;
     for p in w.pairs.iter_mut() {
         if p.alive == 0 || (p.y + 5 - c.1).abs() >= half + 5 {
@@ -260,15 +291,24 @@ fn hits(w: &mut World, c: (i16, i16), half: i16) -> u8 {
     n
 }
 
-/// Canvas (multicolor px × lines) of a unit kind; wrecks keep their unit's.
-#[inline(always)]
-fn size(kind: u8) -> (u16, u16) {
-    match kind {
-        SKIFF => (SKIFF_W, SKIFF_H),
-        CRAWLER => (CRAWLER_W, CRAWLER_H),
-        _ => (PILLBOX_W, PILLBOX_H),
-    }
-}
+/// Draw order of each kind: PIKEs and KESTRELs fly, shells above them.
+static Z: [i8; 12] = [0, -3, -3, -3, -3, 3, 3, -3, -3, -3, -3, 4];
+
+/// Canvas (multicolor px × lines) of each unit kind; wrecks keep their unit's.
+static SIZE: [(u8, u8); 12] = [
+    (0, 0),
+    (SKIFF_W as u8, SKIFF_H as u8),
+    (PILLBOX_W as u8, PILLBOX_H as u8),
+    (HATCH_W as u8, HATCH_H as u8),
+    (CRAWLER_W as u8, CRAWLER_H as u8),
+    (PIKE_W as u8, PIKE_H as u8),
+    (KESTREL_W as u8, KESTREL_H as u8),
+    (ROOF_W as u8, ROOF_H as u8),
+    (BELL_W as u8, BELL_H as u8),
+    (MORTAR_W as u8, MORTAR_H as u8),
+    (PILLBOX_W as u8, PILLBOX_H as u8),
+    (SHELL_W as u8, SHELL_H as u8),
+];
 
 /// Hit points by kind.
 const HP: [u8; 5] = [0, 3, 4, 8, 6];
@@ -292,7 +332,7 @@ const DONE: u8 = 5;
 
 impl Ground {
     pub const fn new() -> Ground {
-        Ground { units: [NO_UNIT; UNITS], next: 0, next_at: 0, last: 0, live: 0 }
+        Ground { units: [NO_UNIT; UNITS], next: 0, next_at: 0, last: 0, live: 0, strings: [Str { left: 0, timer: 0, rec: 0 }; STRINGS], pair: 255, air: 0, gnd: 0 }
     }
 
     /// Whether the step has work at stage line `at` (resident: decides the paging). Pure and called only
@@ -309,8 +349,11 @@ impl Ground {
     pub fn sprites(&self, out: &mut [Sprite; crate::game::INSTANCES], n: &mut usize) {
         for u in &self.units {
             if u.state != FREE {
-                let (w, h) = size(u.kind);
-                crate::game::put(out, n, SKIFF_FRAME + u.frame as u16, u.px, u.py, w, h, Z_GROUND);
+                // S2's kinds draw from the stage block at 0.
+                let k = u.kind as usize & 15;
+                let (w, h) = SIZE[k];
+                let base = if u.kind < PIKE { SKIFF_FRAME } else { 0 };
+                crate::game::put(out, n, base + u.frame as u16, u.px, u.py, w as u16, h as u16, Z[k] as i16);
             }
         }
     }
@@ -608,7 +651,7 @@ fn crawler(u: &mut Unit, w: &mut World, s: Seen) {
 /// A WASP out of a HATCH's shaft on `drop_u`, dog-legging toward the TALON's side.
 #[inline(never)]
 #[cfg_attr(target_arch = "mos", unsafe(link_section = ".text.resident.ground_launch"))]
-fn launch(w: &mut World, x: i16, y: i16, right: bool) {
+pub(crate) fn launch(w: &mut World, x: i16, y: i16, right: bool) {
     for k in 0..WASPS {
         if !w.wasps[k].alive {
             w.wasps[k] = Wasp {

@@ -32,6 +32,7 @@ pub fn all() -> Vec<(String, ModelFile)> {
         ("midboss.s1.keelbreaker".into(), keelbreaker()),
         ("midboss.s1.keelbreaker.turret".into(), keelbreaker_turret()),
         ("hd.ship.talon".into(), talon()),
+        ("hd.ship.peregrine".into(), peregrine()),
     ];
     for k in 0..HATCH_POSES {
         out.push((format!("enemy.common.hatch.open{k}"), hatch(k)));
@@ -316,6 +317,48 @@ pub fn talon() -> ModelFile {
         m.tube([x, -26.0, 3.0], [x, -31.0, 3.0], 2.0, 6, 1, 3);
     }
     model("hd.ship.talon", (36, 66), &[("roll", 9.0), ("roll_max_deg", 60.0)], m)
+}
+
+/// The PEREGRINE (S2's airframe, QUILL's after the first promotion), hand-built to its approved
+/// silhouette (`docs/story/hd/ships/ship-peregrine.md`): a needle nose, a long narrow fuselage, a cranked
+/// delta with a sharp kink at half span, a dorsal spine ridge, small wingtip fins and one big round
+/// nozzle. Long and narrow where the TALON is broad: 70 px long, 50 across. Cream (`light`) armour,
+/// terracotta (`dark`) wing panels, in S2's colors.
+pub fn peregrine() -> ModelFile {
+    let mut m = Mesh::new(vec![
+        Material::lit(&[VOID, DARK, LIGHT], 1.0, 2),
+        Material::lit(&[VOID, DARK, LIGHT], 0.6, 2),
+        Material::lit(&[DARK, LIGHT, HOT], 0.8, 1),
+        Material::glow(HOT),
+    ]);
+    // Fuselage: a needle nose, then a long body that thickens to the wing root and narrows to the nozzle.
+    let nose = [0.0, 34.0, 2.0];
+    let (c0, c1, c2, c3) = ([0.0, 22.0, 4.5], [0.0, 8.0, 6.0], [0.0, -14.0, 6.0], [0.0, -28.0, 5.0]);
+    let (s0, s1, s2, s3) = ([1.6, 24.0, 2.0], [3.6, 10.0, 3.0], [4.2, -14.0, 3.0], [4.4, -28.0, 2.5]);
+    m.sym(&[nose, s0, c0], 0);
+    m.sym(&[c0, s0, s1, c1], 0);
+    m.sym(&[c1, s1, s2, c2], 0);
+    m.sym(&[c2, s2, s3, c3], 0);
+    m.sym(&[nose, [0.0, 24.0, -1.0], s0], 1);
+    m.sym(&[[0.0, 24.0, -1.0], [0.0, -28.0, -1.0], s3, s2, s1, s0], 1);
+    // Canopy: a slim light-blue slit ahead of the wing.
+    m.poly(&[[0.0, 21.0, 4.9], [1.3, 15.0, 5.5], [0.0, 9.0, 6.3], [-1.3, 15.0, 5.5]], 2);
+    // Dorsal spine ridge from behind the canopy to the tail.
+    m.beam([0.0, 8.0, 6.0], [0.0, -27.0, 6.5], 1.6, 1.4, 1);
+    // Cranked delta: the inner panel swept steeply from far forward to the kink at half span, the
+    // outer panel swept less to the tip; one straight trailing edge. Terracotta panels in the middle.
+    let (root_le, kink, tip, tip_te, root_te) =
+        ([3.4, 12.0, 3.0], [13.0, -8.0, 2.4], [25.0, -18.0, 1.6], [25.0, -23.0, 1.6], [4.3, -23.0, 2.8]);
+    m.sym(&[root_le, kink, [12.0, -12.0, 2.4], [4.2, -10.0, 3.0]], 0);
+    m.sym(&[[4.2, -10.0, 3.0], [12.0, -12.0, 2.4], [13.0, -23.0, 2.2], root_te], 1);
+    m.sym(&[kink, tip, tip_te, [13.0, -23.0, 2.2], [12.0, -12.0, 2.4]], 0);
+    // Wingtip fins: small, raked back.
+    for sx in [-1.0, 1.0] {
+        m.poly(&[[sx * 25.0, -17.0, 1.6], [sx * 25.0, -23.5, 1.6], [sx * 25.0, -25.0, 6.5]], 1);
+    }
+    // One big round nozzle.
+    m.tube([0.0, -27.0, 4.0], [0.0, -34.0, 4.0], 3.6, 8, 1, 3);
+    model("hd.ship.peregrine", (32, 72), &[("roll", 9.0), ("roll_max_deg", 60.0)], m)
 }
 
 fn model(name: &str, canvas: (u16, u16), orient: &[(&str, f64)], mesh: Mesh) -> ModelFile {

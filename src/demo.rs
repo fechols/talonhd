@@ -55,7 +55,71 @@ pub const QUEEN_WRECKS: u16 = 3;
 pub const QUEEN_WRECK_BANKS: [u16; 3] = [8, 24, 40];
 /// Body sprite x of the wreck centred on the screen (canvas centre at multicolor x 80).
 pub const QUEEN_WRECK_X: i16 = 80 - BOSS_SIZE as i16 / 2;
-pub const FRAMES: u16 = QUEEN_WRECK_FRAME + QUEEN_WRECKS;
+/// The PEREGRINE (S2's airframe, QUILL's after the first promotion, `crate::clear`): 9 banks, then the
+/// 8 steps of its energy waves around the level bank without the hull (drawn under the bank frame).
+pub const PEREGRINE_FRAME: u16 = QUEEN_WRECK_FRAME + QUEEN_WRECKS;
+pub const PEREGRINE_SHIELD_FRAME: u16 = PEREGRINE_FRAME + PLAYER_BANKS;
+/// The stage-clear and stage cards (`clear::CARD_TEXT`): one frame per line, `LINE_H` lines of text
+/// on a `void` plate; a `dark` rule above and below the card; the tally's digits 0-9 and a comma.
+pub const CARD_LINES: u16 = crate::clear::CLEAR_LINES + crate::clear::STAGE_LINES;
+pub const CARD_FRAME: u16 = PEREGRINE_SHIELD_FRAME + SHIELD_STEPS;
+pub const EDGE_FRAME: u16 = CARD_FRAME + CARD_LINES;
+pub const DIGIT_FRAME: u16 = EDGE_FRAME + 1;
+pub const DIGITS: u16 = 11;
+pub const FRAMES: u16 = DIGIT_FRAME + DIGITS;
+
+/// The stage block. Every level image has the same `FRAMES` frames: the COMMON ones (WASP, the ships,
+/// shots, bursts, SPARKs, the cards) at the ids above, rendered under that stage's light, and the
+/// stage's own enemies and bosses in the slots S1 gives to the GANTRY QUEEN, her parts and the
+/// KEELBREAKER (unused slots hold blank frames). S2 TERRACES' block, from 0
+/// (`models::stage_frames`, `crate::hand_s2`):
+/// - PIKE at 16 headings (0 = nose up the screen, counter-clockwise, as every yaw set);
+/// - KESTREL at 16 headings × 3 rolls (left, level, right), heading-major;
+/// - ROOF HATCH: its ridge hatch opening (6 poses), then blown open (its wreck);
+/// - BELL TURRET at 16 headings, then the same 16 armed;
+/// - DOME MORTAR: its slit opening (4 poses, tube down the screen), then open at 16 headings;
+/// - PILLBOX at 16 headings and 16 armed, and the wrecks (small, large), under S2's sun;
+/// - the mortar's shell, 4 sizes (it climbs, then falls);
+/// - the CAMPANILE's crown (8 spin steps over 45°) and bell hub (4 poses); the ASTROLABE's body (8
+///   shutter poses), its rings (outer, middle, inner: 16 spin steps over 60° each) and lens (4 pulses).
+pub const S2_PIKE_FRAME: u16 = 0;
+pub const S2_KESTREL_FRAME: u16 = S2_PIKE_FRAME + UNIT_YAWS;
+pub const KESTREL_ROLLS: u16 = 3;
+pub const S2_ROOF_FRAME: u16 = S2_KESTREL_FRAME + UNIT_YAWS * KESTREL_ROLLS;
+pub const ROOF_POSES: u16 = 6;
+pub const S2_BELL_FRAME: u16 = S2_ROOF_FRAME + ROOF_POSES + 1;
+pub const S2_MORTAR_FRAME: u16 = S2_BELL_FRAME + 2 * UNIT_YAWS;
+pub const MORTAR_POSES: u16 = 4;
+pub const S2_PILLBOX_FRAME: u16 = S2_MORTAR_FRAME + MORTAR_POSES + UNIT_YAWS;
+pub const S2_WRECK_FRAME: u16 = S2_PILLBOX_FRAME + 2 * UNIT_YAWS;
+pub const S2_SHELL_FRAME: u16 = S2_WRECK_FRAME + 2;
+pub const SHELL_SIZES: u16 = 4;
+pub const S2_CROWN_FRAME: u16 = S2_SHELL_FRAME + SHELL_SIZES;
+pub const CROWN_SPINS: u16 = 8;
+pub const S2_HUB_FRAME: u16 = S2_CROWN_FRAME + CROWN_SPINS;
+pub const HUB_POSES: u16 = 4;
+pub const S2_ASTRO_FRAME: u16 = S2_HUB_FRAME + HUB_POSES;
+pub const SHUTTER_POSES: u16 = 8;
+pub const S2_RING_FRAME: u16 = S2_ASTRO_FRAME + SHUTTER_POSES;
+pub const RING_SPINS: u16 = 16;
+pub const S2_LENS_FRAME: u16 = S2_RING_FRAME + 3 * RING_SPINS;
+pub const LENS_PULSES: u16 = 4;
+pub const S2_FRAMES: u16 = S2_LENS_FRAME + LENS_PULSES;
+const _: () = assert!(S2_FRAMES <= DRONE_FRAME, "S2's block must fit the slots S1's bosses use");
+
+/// S2 canvases (multicolor px × lines).
+pub const PIKE_W: u16 = 16;
+pub const PIKE_H: u16 = 32;
+pub const KESTREL_W: u16 = 32;
+pub const KESTREL_H: u16 = 52;
+pub const ROOF_W: u16 = 24;
+pub const ROOF_H: u16 = 40;
+pub const BELL_W: u16 = 22;
+pub const BELL_H: u16 = 44;
+pub const MORTAR_W: u16 = 24;
+pub const MORTAR_H: u16 = 48;
+pub const SHELL_W: u16 = 6;
+pub const SHELL_H: u16 = 12;
 
 pub const BOSS_SIZE: u16 = 512;
 /// Screen line of the boss canvas centre: it hovers at the top, mostly above the screen.
@@ -100,6 +164,13 @@ pub const HATCH_H: u16 = 44;
 pub const CRAWLER_W: u16 = 32;
 pub const CRAWLER_H: u16 = 64;
 pub const SHIELD_W: u16 = 48;
+pub const PEREGRINE_W: u16 = 32;
+pub const PEREGRINE_H: u16 = 72;
+/// Card plates: 92 multicolor px (184 hires, the sides under the HUD's ladders), 9 lines a text line.
+pub const CARD_W: u16 = 92;
+pub const LINE_H: u16 = 9;
+pub const DIGIT_W: u16 = 3;
+pub const DIGIT_H: u16 = 7;
 pub const SHIELD_H: u16 = 88;
 
 /// Lines in one period of the looping panorama: S1 BREAKWATER, 26 screens (the image has 200 more, a

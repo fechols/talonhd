@@ -77,6 +77,8 @@ pub struct Image {
     pub phases: u32,
     pub phase_lens: [u8; crate::paging::PHASES as usize],
     pub phase_stamp: u16,
+    /// The level the image holds (`format::header::LEVEL`).
+    pub level: u8,
     /// Image size and the additive checksum of bytes `HEADER_LEN..size`.
     pub size: u32,
     pub checksum: u32,
@@ -127,6 +129,7 @@ pub fn read_image<H: Hw + ?Sized>(hw: &mut H) -> Option<Image> {
             l
         },
         phase_stamp: le16(&h, header::PHASE_STAMP),
+        level: h[header::LEVEL],
         size: le32(&h, header::SIZE),
         checksum: le32(&h, header::CHECKSUM),
     })

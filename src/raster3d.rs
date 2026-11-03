@@ -241,11 +241,6 @@ fn normalize(a: V3) -> V3 {
     [a[0] / l, a[1] / l, a[2] / l]
 }
 
-/// Shade of one face under the morning light.
-fn shade(m: &Material, normal: V3) -> (u8, u8) {
-    shade_lit(m, normal, &MORNING, false)
-}
-
 /// Shade of one face: (code a, code b); a == b is solid, else a checkerboard. `shadowed`: the sun is
 /// blocked, only the ambient term remains.
 fn shade_lit(m: &Material, normal: V3, light: &Light, shadowed: bool) -> (u8, u8) {
@@ -291,8 +286,13 @@ impl View {
 
 const SS: usize = 4;
 
-/// Render `mesh` at orientation `o`.
+/// Render `mesh` at orientation `o` under the morning light (S1, and every sprite approved under it).
 pub fn render(mesh: &Mesh, o: Orient, view: View) -> SpriteImage {
+    render_lit(mesh, o, view, &MORNING)
+}
+
+/// Render `mesh` at orientation `o` under a stage's `light` (one light per stage, sprites and level).
+pub fn render_lit(mesh: &Mesh, o: Orient, view: View, light: &Light) -> SpriteImage {
     let (w, h) = (view.w as usize, view.h as usize);
     let (sw, sh) = (w * SS, h * SS);
     let mut depth = vec![f64::NEG_INFINITY; sw * sh];
@@ -323,7 +323,7 @@ pub fn render(mesh: &Mesh, o: Orient, view: View) -> SpriteImage {
         } else {
             [0.0, 0.0, 1.0]
         };
-        shades.push(shade(&mesh.materials[mesh.mats[ti] as usize], normal));
+        shades.push(shade_lit(&mesh.materials[mesh.mats[ti] as usize], normal, light, false));
 
         let area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
         if area.abs() < 1e-9 {

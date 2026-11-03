@@ -40,7 +40,9 @@ Host (run cargo from **PowerShell**: Git Bash's `link` shadows MSVC):
 cargo test --release                     # renderer vs reference compositor, raster3d goldens
 cargo check --no-default-features        # shared library still builds no_std
 cargo run --release -- bake              # dist/talonhd.reu (+ music, + dist/phases) and previews, self-checked
-cargo run --release -- preview --t 150   # attract-mode tick 150 through the model
+cargo run --release -- bake --stage 2    # dist/talonhd_s2.reu (S2 TERRACES), output/frames_s2/, self-checked
+cargo run --release -- preview --t 150   # attract-mode tick 150 through the model (--stage 2: the S2 image)
+cargo run --release -- s2                # S2 TERRACES: output/sheets/panorama_s2.png, s2_*.png, anim_s2_*.png
 cargo run --release --example queen_assembly   # output/lineup/queen.png: GANTRY QUEEN body + parts at 3 banks
 cargo run --release --example frame_stats -- dist/talonhd.reu 512   # DMAs / blends / I/O writes per frame
 ```
@@ -61,7 +63,7 @@ C64 (rust-mos + llvm-mos in WSL `Ubuntu-24.04`, paths in `scripts/env.sh`):
 ```sh
 pwsh scripts/build-windows.ps1           # -> dist/talonhd.prg, dist/talonhd.elf, dist/phases/*.bin (BEFORE bake)
 python tools/test_blit.py                # asm sprite kernel draw_cols vs reference in a 6502 interpreter
-python tools/test_sprite.py              # asm draw_sprite (cache, bands, chunks, clipping) vs reference, on the baked image
+python tools/test_sprite.py [n] [image]  # asm draw_sprite (cache, bands, chunks, clipping) vs reference, on a baked image
 python tools/c64u.py bench               # with a `-Features bench` build: the C64U's unit costs (I/O write, DMA, stores)
 python tools/test_hud_irq.py             # HUD raster IRQ vs the table contract
 python tools/check_phases.py             # REU paging audit: resident code enters the window only at phase entries; a
@@ -138,18 +140,33 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   current (banking I/O in if the step had it out). Only BOOT rides in the PRG; every other phase has its
   load address outside it (`link.ld` `phimg`), `tools/phases.py` (run by the build) extracts them to
   `dist/phases/` and stamps the PRG (`PHASE_STAMP`), `bake` embeds them in the level REU image (header
-  `PHASES`, lengths in 256-byte pages (u8: up to 16 phases), stamp at 34), and boot (`install_phases`) copies them to the phase bank; a stamp mismatch
+  `PHASES`, lengths in 256-byte pages (u8: up to 15 phases; byte 63 is the image's `LEVEL`), stamp at 34), and boot (`install_phases`) copies them to the phase bank; a stamp mismatch
   is fatal (border 8). So: build the C64 program, then bake, then `run` + `upload-reu`. Phases: `BOSS` (the fight's step logic; `Boss::sprites/palette` and `placement` stay resident),
   `ATTRACT` (ACE's `see`), `MIDBOSS` (the KEELBREAKER's step), `BOOT` (`hud_init`, image checks,
   `install_phases`, `Game::reset`), `GROUND` (the ground units' step; paged while `Ground::busy`), `AUDIO`
   (the music producer, every frame), `TUNE` (music setup, once), `ACE` and `MOTOR` (ACE's `think` and
-  `motor`; ATTRACT, MOTOR and ACE are each paged once every attract tick). A phase
+  `motor`; ATTRACT, MOTOR and ACE are each paged once every attract tick), `STAGE` (the stage clear's
+  step, and at render time `Clear::sprites` while a card shows), and S2's three: `S2` (`stage2::waves`:
+  placements and WASP strings, paged only while one is due), `S2GND` (`gnd2::step`, while `Ground::gnd`) and
+  `S2AIR` (`air2::step`, while `Ground::air`), paged by the resident `stage2::run`. A phase
   may call resident code only. Link with `--no-check-sections` (phases overlap by design); build with
   `-Zmerge-functions=disabled -Zno-jump-tables` (`target-c64/.cargo/config.toml`): LLVM folded identical
   `aim` functions into one copy in the BOSS phase and resident code called it while another phase was in
   the window. After every C64 build run `tools/check_phases.py`; add a phase = a `ph_*` region, a
   `.phase.*` section, its symbols in `main.rs`, its entry in `check_phases.py` `ENTRIES`. 6502 math: avoid
   i32 multiplies in per-frame code (turret aiming cost 3 ms each until it went 16-bit, in the step).
+- **Stage clear and promotion** (`src/clear.rs`, `Game::clear`, paged `STAGE`; user: "Let's make the next
+  stage!"): when the boss falls, `hot` greys out (`fx.node_dark`), waves and bullets stop, the stick is
+  ignored; the ship eases to centre and climbs off the top; the stage-clear card (rank, BRANDT's line,
+  QUILL's reply, BOSS TIME + CLEAN AIRFRAME counting into the score at 1,000 a tick, Fire skips); the
+  palette walks to the next stage's colors (`fx.promotion_walk`, `clear::toward`: through the luminance
+  groups' greys, void first, hot last, a step every 8 ticks) while the next airframe (the hand-built
+  PEREGRINE, `hand::peregrine`, TALON handling for now) climbs in; the next stage's card; then play from
+  line 0 (`start_stage`). Until S2 exists that is BREAKWATER again in S2's palette (`clear::PALETTES`).
+  Card text is baked: one frame per line (`font.rs`, a condensed 3×7 font: 6×7 on screen; lines of at most 19
+  characters, inside the HUD's ladders; a `void` plate, stored unshifted),
+  digits as small frames. The PEREGRINE's energy waves are one 8-step field drawn under its bank frame
+  (the image had no room for 72 more frames). `the_stage_clears_and_promotes`, `examples/clear_trace.rs`.
 - **Light / time of day** (`raster3d::Light`, `02-ladder.md` rung `light`): one light per stage for its sprites
   AND its level. Shading is normalised to the S1 morning sun (`MORNING`, the light every approved model used),
   so a lower sun darkens flat ground. S2-S8 lights are drafts pending approval.
@@ -174,6 +191,30 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   shadows traced over the lens per pixel, lifting void → dark → light. Review: `output/sheets/anim_*.png`
   (frames side by side). Budget: ~48 frames fit under the music ring at `$FE8000`; `bake` refuses an image
   that reaches it.
+- **S2 TERRACES** (`src/s2.rs`, host; bible `docs/story/hd/models/s2.md`, approved with S2's afternoon light):
+  built like S1 under `s2::SUN` (upper right: shadows fall lower left), palette brown/terracotta/cream/light
+  blue. Contour terraces of flat-topped vine rows (a gust crosses them once a loop), dry-stone walls,
+  cypress lines (swaying), farmhouses, a zig-zag track; the AQUEDUCT over its ravine (glints running along
+  the channel, keyed to position; geometry must stay inside x -8..328 or the shadow map's bounds move and the
+  loop seams); the hill village (hipped roofs, courtyards, laundry, the fountain plaza with ripples and
+  awnings, the CAMPANILE's tower at `s2::TOWER` in its square, cracks converging on it); the observatory
+  (domes with creeping shutter slits, gravel paths, the sundial, the great dome at `s2::GREAT_DOME`).
+  In the game as level 1 (below).
+- **Levels** (`Clear::level`: 0 S1, 1 S2; `first`/`top`): every level image has the same frame ids; the COMMON
+  frames (WASP, ships, shots, bursts, SPARKs, cards) sit at their S1 ids rendered under the stage's light, and
+  the stage block reuses the slots of S1's bosses (`demo::S2_*` from 0; `models::stage_frames`). Header byte
+  `LEVEL` (63) names the image's level; boot calls `Game::reset_at(img.level)`, so a C64 plays the level of
+  the image it booted, and keeps it after the clear until the per-level load exists (`top`); the host's
+  `Game::new()` plays S1 then S2. `game::replay_level` (preview, compare) replays an image's attract mode. S2's
+  waves are `stage2::PLACEMENTS` (6-byte `P2`, from the bible's 14 waves, `s2_placements_sit_on_the_level`):
+  PIKEs on `air2::RAILS` (the level's vine rows, aqueduct channel, lanes and a gravel path, sampled every 32
+  px; `the_rails_follow_the_level` regenerates them from `s2.rs`), KESTREL pairs, ROOF HATCHes on farmhouses
+  and village roofs, BELL TURRETs, DOME MORTARs (shells lobbed at the ship's position, harmless until their
+  last 20 ticks, then the sim's own shootable `B_BOMB`), S2's PILLBOX, WASP strings along the sim's own
+  curves. The vendored sim's S1 track is held off (`track_base`); air units ram the ship by putting a WASP on
+  it (the sim's own collision). The world's scroll wraps at `PANO_PERIOD` (`Game::step`), so the stage line
+  is the scroll, never a 32-bit modulo. Music: `assets/music/cue.stage_s2.dlt`. Not yet: the CAMPANILE, the
+  ASTROLABE, S2's clear, the per-level load. Tests: `stage2::tests` (ACE flies S2: 0 deaths).
 - **Ground units** (`src/ground.rs`, paged): SKIFF, PILLBOX, HATCH, CRAWLER as sprites in stage coordinates
   (world x, `u` = stage line; screen y = 200 + lines - u), from `PLACEMENTS` (the bible waves placed on
   `s1.rs` geometry; `placements_sit_on_the_level` checks quays, pits, roofs, water with `s1::surface`).
@@ -211,7 +252,7 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   `see`, MOTOR `motor`, ACE `think`), sharing a `Mind` in `SEG_BUF`; its memory (`Ace`, 12 B) is in the
   `Game`, so the replay and `compare` stay exact. Time-sliced: one phase a tick (see, motor, think; a decision
   every 3 ticks, the Mind parked in the REU at `ace::MIND_REU` between ticks). Host: `the_ace_outflies_the_autopilot`
-  (16,000 ticks: 0 deaths, both bosses; 40,000 ticks, 2.5 laps: 0 deaths, 184,300; the vendored autopilot: 10
+  (16,000 ticks: 1 death, both bosses; the vendored autopilot: 10
   deaths, 3,100), `examples/ace_death.rs` (the world before any death),
   `the_ace_flies_smoothly`; `cargo run --release --example ace_trace` prints its flight log. The vendored
   `sim::replay::autopilot` stays for the sim's pinned tests.
@@ -250,10 +291,13 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   `.lowbss` (NOLOAD, the tail of `$0200-$07FF`); main RAM had 2 bytes free after the ground units. 6502
   size: avoid i32/u32 in our code (the vendored sim's Q8 i32 positions are its own), struct-literal resets
   of big structs, and repeated store sites (`game::put` is the scene's one sprite store). `World::digest` stays host-only
-  (2 KB of 6502). Keep the `/DISCARD/ .init.250` rule: it calls KERNAL CHROUT at `$FFD2`, which is our code now.
+  (2 KB of 6502). `asm/mem.S` replaces compiler_builtins' 536-byte `memcpy` (a page loop, ~50 bytes; it freed the RAM the
+  stage clear needed). Keep the `/DISCARD/ .init.250` rule: it calls KERNAL CHROUT at `$FFD2`, which is our code now.
 - **Boot:** the PRG erases the REU magic, then waits for magic + whole-image checksum, so `run` then `upload-reu`
   always starts on the complete new image.
-- **Next:** the promotion sequence and the per-level REU load (it must not overwrite the phase bank `$FF0000`). Then animation loops for the other stages. Memory ideas from the
+- **6502 size:** never u32/i32 math in our code (user: "massive code bloat"); a u32 `%` in `lines()` cost
+  over 400 bytes of resident RAM. Check `llvm-size -A dist/talonhd.elf` and the link map after changes.
+- **Next:** S2's CAMPANILE and ASTROLABE and its clear, the per-level REU load (it must not overwrite the phase bank `$FF0000`). Then animation loops for the other stages. Memory ideas from the
   sibling repos still open: `opt-level "z"`, zero page `$90-$FF`, boot-only code in a retired section,
   borrow-and-restore overlays (impact), an IRQ static-frame audit (sueme64).
 - **Hardware quirk:** `c64u.py run` right after `config` can reset the machine before the PRG loads; run again.

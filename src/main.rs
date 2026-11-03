@@ -5,6 +5,7 @@
 //! talonhd preview [--reu FILE] [--t N] [--out PNG]
 //! talonhd compare [--reu FILE] --dump DIR [--t N]
 //! talonhd bake-model <file.mesh> [--palette v,d,l,h] [--out PNG]   orientation sheet + light share
+//! talonhd s2                                                      S2 TERRACES: panorama and loop previews
 //! talonhd hand-models                                             write the hand-built models' .mesh files
 //! talonhd lineup [--palette v,d,l,h] [--out PNG]                 the roster at C64 size on the stage's void
 //! ```
@@ -21,6 +22,7 @@ use talonhd::{demo, game, mesh, models, png, reference};
 
 /// S1 BREAKWATER's stage music: TALON's `cue.stage_s1`, encoded by `../sueme64`'s DLT5 encoder (THIRD-PARTY.md).
 const MUSIC_S1: &str = "assets/music/cue.stage_s1.dlt";
+const MUSIC_S2: &str = "assets/music/cue.stage_s2.dlt";
 
 struct Args(Vec<String>);
 
@@ -49,6 +51,7 @@ fn main() -> ExitCode {
         "compare" => cmd_compare(&args),
         "bake-model" => cmd_bake_model(&argv[1..]),
         "hand-models" => cmd_hand_models(),
+        "s2" => cmd_s2(),
         "lineup" => cmd_lineup(&args),
         other => Err(format!("unknown command {other}")),
     };
@@ -92,7 +95,43 @@ fn sheet(frames: &[SpriteImage], pal: render::Palette) -> (usize, Vec<[u8; 3]>) 
     (w * n, out)
 }
 
+/// S2 TERRACES for review: the whole panorama (`output/sheets/panorama_s2.png`) and its animation loop
+/// through windows of interest (`output/sheets/anim_s2_*.png`), with each section's code shares.
+fn cmd_s2() -> Result<(), String> {
+    let t0 = std::time::Instant::now();
+    let panos = talonhd::s2::panorama_frames();
+    println!("S2 animation: {} frames rendered in {:.1} s", panos.len(), t0.elapsed().as_secs_f64());
+    let pano = &panos[0];
+    let s = talonhd::s1::code_share(pano);
+    println!("S2 panorama: void {:.0} %, dark {:.0} %, light {:.1} %, hot {:.1} %", s[0] * 100.0, s[1] * 100.0, s[2] * 100.0, s[3] * 100.0);
+    let strip: Vec<[u8; 3]> = pano.codes.iter().map(|&c| talonhd::palette::PALETTE[pano.palette.color_of(c) as usize]).collect();
+    png::save_wide(&Path::new("output/sheets").join("panorama_s2.png"), 160, &strip)?;
+    let period = demo::PANO_PERIOD as usize;
+    for (name, line) in [("vines", 300), ("farm", 160), ("aqueduct", 1680), ("village", 2100), ("square", 2500), ("fountain", 2960), ("domes", 3700), ("great_dome", 4980)] {
+        let top = period - line - 100;
+        let (w, h) = (160usize, 200usize);
+        let n = panos.len();
+        let mut px = vec![[0u8; 3]; w * n * h];
+        for (k, p) in panos.iter().enumerate() {
+            for y in 0..h {
+                for x in 0..w {
+                    px[y * w * n + k * w + x] = talonhd::palette::PALETTE[p.palette.color_of(p.codes[(top + y) * 160 + x]) as usize];
+                }
+            }
+        }
+        png::save_wide(&Path::new("output/sheets").join(format!("anim_s2_{name}.png")), w * n, &px)?;
+        // The first frame alone, screen-sized, for review.
+        let one: Vec<[u8; 3]> = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).map(|(x, y)| px[y * w * n + x]).collect();
+        png::save_wide(&Path::new("output/sheets").join(format!("s2_{name}.png")), w, &one)?;
+    }
+    println!("previews: output/sheets/panorama_s2.png, s2_*.png, anim_s2_*.png");
+    Ok(())
+}
+
 fn cmd_bake(args: &Args) -> Result<(), String> {
+    if args.num("--stage", 1)? == 2 {
+        return cmd_bake_s2(args);
+    }
     let out = args.path("--out", "dist");
     let previews = PathBuf::from("output");
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
@@ -144,6 +183,10 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         ("wreck", demo::WRECK_FRAME, 1),
         ("hulk", demo::WRECK_FRAME + 1, 1),
         ("qwreck", demo::QUEEN_WRECK_FRAME, demo::QUEEN_WRECKS),
+        ("peregrine", demo::PEREGRINE_FRAME, demo::PLAYER_BANKS),
+        ("pshield", demo::PEREGRINE_SHIELD_FRAME, demo::SHIELD_STEPS),
+        ("card", demo::CARD_FRAME, demo::CARD_LINES + 1),
+        ("digits", demo::DIGIT_FRAME, demo::DIGITS),
     ];
     let mut total = pano.rows as usize * 320 * panos.len();
     println!("panorama: {} cell rows, {} bytes x {} frames", pano.rows, pano.rows as usize * 320, panos.len());
@@ -152,6 +195,13 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         let bytes: usize = set.iter().map(bake::frame_bytes).sum();
         total += bytes;
         println!("{name:>7}: {count:3} frames {}x{} x{} phases: {bytes:>9} bytes", set[0].w, set[0].h, set[0].phases);
+        // The PEREGRINE flies in S2's colors (`clear::PALETTES`).
+        let pal = if name == "peregrine" || name == "pshield" {
+            let c = talonhd::clear::PALETTES[1];
+            talonhd::render::Palette::new(c[0], c[1], c[2], c[3])
+        } else {
+            pal
+        };
         let (w, px) = sheet(set, pal);
         png::save_wide(&previews.join(format!("sheets/{name}.png")), w, &px)?;
     }
@@ -163,19 +213,7 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         let (samples, books) = talonhd::audio::validate(&music)?;
         println!("music: {MUSIC_S1}: {} bytes, {:.1} s, {books} codebooks", music.len(), samples as f64 / 16_000.0);
     }
-    // The C64 build's paged code phases (`scripts/build-target.sh` writes them): the image carries them.
-    let phases: Vec<Vec<u8>> = talonhd::paging::NAMES
-        .iter()
-        .map(|n| std::fs::read(format!("dist/phases/{n}.bin")).unwrap_or_default())
-        .collect();
-    let phases = if phases.iter().all(|p| !p.is_empty()) {
-        let refs: Vec<&[u8]> = phases.iter().map(|v| v.as_slice()).collect();
-        println!("phases: {} B in {} slots, stamp {:04x}", phases.iter().map(|p| p.len()).sum::<usize>(), phases.len(), talonhd::paging::stamp(&refs));
-        phases
-    } else {
-        println!("phases: dist/phases incomplete (build the C64 program first); the image has none");
-        Vec::new()
-    };
+    let phases = load_phases();
     let image = bake::build_animated_level(&panos, talonhd::s1::ANIM_SHIFT, &frames, 0, &music, &phases)?;
     println!("level image: {} bytes of 16 MiB ({:.1} %), art ~{total} bytes", image.len(), image.len() as f64 * 100.0 / 16777216.0);
     write(&out.join("talonhd.reu"), &image)?;
@@ -185,15 +223,21 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
     let mut m = Machine::new(&image);
     let img = render::read_image(&mut m).unwrap();
     // Attract-mode ticks: the first frames, WASP strings, a GANNET's dive and bombs, the docks, the boss.
+    // As a C64 booted with this image: S1, and S1 again after its clear.
     let mut g = game::Game::new();
+    g.reset_at(0);
     let mut mind = talonhd::ace::Mind::new();
     // Then probed ticks: a camera shake (the TALON just hit), 200 ticks into the GANTRY QUEEN fight, and
     // phase 2 if the autopilot gets there.
     let mut ticks = vec![0u32, 1, 2, 3, 150, 450, 900, 1700, 3300, 3420, 5000, 7000];
     let mut probe = game::Game::new();
+    probe.reset_at(0);
     let mut probe_mind = talonhd::ace::Mind::new();
     let (mut shake, mut fight, mut phase2, mut keel) = (None, None, None, None);
-    while probe.ticks < 40_000 && (shake.is_none() || keel.is_none() || fight.is_none() || phase2.is_none()) {
+    // The stage clear: the tally counting, the walk, the next stage's card, play as the PEREGRINE.
+    let mut clear: Vec<u32> = Vec::new();
+    let mut clear_phase = talonhd::clear::OFF;
+    while probe.ticks < 40_000 && (shake.is_none() || keel.is_none() || fight.is_none() || phase2.is_none() || clear.len() < 4) {
         let input = talonhd::ace::fly(&mut probe, &mut probe_mind);
         probe.step(input);
         if shake.is_none() && probe.pilot.since_hit == 3 {
@@ -210,10 +254,22 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         if probe.boss.state == talonhd::boss::PHASE2 && phase2.is_none() {
             phase2 = Some(probe.ticks + 30);
         }
+        if probe.clear.phase != clear_phase && clear.len() < 4 {
+            clear_phase = probe.clear.phase;
+            let after = match clear_phase {
+                talonhd::clear::CARD => Some(110),
+                talonhd::clear::WALK => Some(20),
+                talonhd::clear::STAGE => Some(60),
+                talonhd::clear::OFF => Some(60),
+                _ => None,
+            };
+            clear.extend(after.map(|a| probe.ticks + a));
+        }
     }
     ticks.extend([shake, fight, phase2, keel].into_iter().flatten());
+    ticks.extend(&clear);
     ticks.sort();
-    println!("self-check ticks {ticks:?} (shake {shake:?}, keelbreaker {keel:?}, queen {fight:?}, phase 2 {phase2:?})");
+    println!("self-check ticks {ticks:?} (shake {shake:?}, keelbreaker {keel:?}, queen {fight:?}, phase 2 {phase2:?}, clear {clear:?})");
     for t in ticks {
         while g.ticks < t {
             let input = talonhd::ace::fly(&mut g, &mut mind);
@@ -225,12 +281,126 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         let n = game::scene(&g, &mut sc);
         let k = ((t as u8) >> talonhd::s1::ANIM_SHIFT) as usize & (panos.len() - 1);
         let mut want = reference::compose(&panos[k], &frames, scroll, &sc[..n]);
-        want.color = vec![game::palette(&g, pano.palette).color; 1000];
+        let pal = game::palette(&g, pano.palette);
+        want.color = vec![pal.color; 1000];
+        want.screen = vec![pal.screen; 1000];
         check(&m, buf, &want).map_err(|e| format!("t={t}: {e}"))?;
         png::save(&previews.join(format!("frames/t{t:04}.png")), 320, layout::VISIBLE as u32, &m.visible_with_hud(buf, img.palette.d021, scroll.fine))?;
     }
     println!("model matches reference compositor; stats {:?}", m.stats);
     println!("wrote {} and previews in {}", out.display(), previews.display());
+    Ok(())
+}
+
+/// The C64 build's paged code phases (`scripts/build-target.sh` writes them): every level image carries
+/// them.
+fn load_phases() -> Vec<Vec<u8>> {
+    let phases: Vec<Vec<u8>> = talonhd::paging::NAMES
+        .iter()
+        .map(|n| std::fs::read(format!("dist/phases/{n}.bin")).unwrap_or_default())
+        .collect();
+    if phases.iter().all(|p| !p.is_empty()) {
+        let refs: Vec<&[u8]> = phases.iter().map(|v| v.as_slice()).collect();
+        println!("phases: {} B in {} slots, stamp {:04x}", phases.iter().map(|p| p.len()).sum::<usize>(), phases.len(), talonhd::paging::stamp(&refs));
+        phases
+    } else {
+        println!("phases: dist/phases incomplete (build the C64 program first); the image has none");
+        Vec::new()
+    }
+}
+
+/// S2 TERRACES' level image (`dist/talonhd_s2.reu`): its animated panorama, the stage block, its music,
+/// the phases; self-checked against the reference compositor along an attract-mode flight through it.
+fn cmd_bake_s2(args: &Args) -> Result<(), String> {
+    let out = args.path("--out", "dist");
+    let previews = PathBuf::from("output");
+    std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+    let t0 = std::time::Instant::now();
+    let panos: Vec<Panorama> = talonhd::s2::panorama_frames();
+    println!("S2 animation: {} frames rendered in {:.1} s", panos.len(), t0.elapsed().as_secs_f64());
+    let pano = &panos[0];
+    let frames = models::stage_frames(1);
+    let pal = pano.palette;
+    let groups = [
+        ("pike", demo::S2_PIKE_FRAME, demo::UNIT_YAWS),
+        ("kestrel", demo::S2_KESTREL_FRAME, demo::UNIT_YAWS * demo::KESTREL_ROLLS),
+        ("roof", demo::S2_ROOF_FRAME, demo::ROOF_POSES + 1),
+        ("bell", demo::S2_BELL_FRAME, 2 * demo::UNIT_YAWS),
+        ("mortar", demo::S2_MORTAR_FRAME, demo::MORTAR_POSES + demo::UNIT_YAWS),
+        ("pillbox", demo::S2_PILLBOX_FRAME, 2 * demo::UNIT_YAWS),
+        ("wrecks", demo::S2_WRECK_FRAME, 2),
+        ("shell", demo::S2_SHELL_FRAME, demo::SHELL_SIZES),
+        ("crown", demo::S2_CROWN_FRAME, demo::CROWN_SPINS),
+        ("hub", demo::S2_HUB_FRAME, demo::HUB_POSES),
+        ("astrolabe", demo::S2_ASTRO_FRAME, demo::SHUTTER_POSES),
+        ("rings", demo::S2_RING_FRAME, 3 * demo::RING_SPINS),
+        ("lens", demo::S2_LENS_FRAME, demo::LENS_PULSES),
+        ("wasp", demo::DRONE_FRAME, demo::DRONE_YAWS),
+        ("peregrine", demo::PEREGRINE_FRAME, demo::PLAYER_BANKS + demo::SHIELD_STEPS),
+    ];
+    let mut total = pano.rows as usize * 320 * panos.len();
+    for (name, first, count) in groups {
+        let set = &frames[first as usize..(first + count) as usize];
+        let bytes: usize = set.iter().map(bake::frame_bytes).sum();
+        total += bytes;
+        println!("{name:>9}: {count:3} frames {}x{} x{} phases: {bytes:>9} bytes", set[0].w, set[0].h, set[0].phases);
+        let (w, px) = sheet(set, pal);
+        png::save_wide(&previews.join(format!("sheets/s2_frames_{name}.png")), w, &px)?;
+    }
+    let music = std::fs::read(MUSIC_S2).unwrap_or_default();
+    if music.is_empty() {
+        println!("music: {MUSIC_S2} missing, the level image has none");
+    } else {
+        let (samples, books) = talonhd::audio::validate(&music)?;
+        println!("music: {MUSIC_S2}: {} bytes, {:.1} s, {books} codebooks", music.len(), samples as f64 / 16_000.0);
+    }
+    let phases = load_phases();
+    let mut image = bake::build_animated_level(&panos, talonhd::s2::ANIM_SHIFT, &frames, 0, &music, &phases)?;
+    bake::set_level(&mut image, 1);
+    println!("S2 level image: {} bytes of 16 MiB ({:.1} %), art ~{total} bytes", image.len(), image.len() as f64 * 100.0 / 16777216.0);
+    write(&out.join("talonhd_s2.reu"), &image)?;
+
+    // Self-check along an attract-mode flight through the stage (ACE on a C64 booted with this image).
+    let mut m = Machine::new(&image);
+    let img = render::read_image(&mut m).unwrap();
+    assert_eq!(img.level, 1);
+    let mut g = game::Game::new();
+    g.reset_at(1);
+    let mut mind = talonhd::ace::Mind::new();
+    let mut ticks: Vec<u32> = vec![0, 1, 2, 3, 700, 1300, 1900, 2500, 3200, 3900, 4600, 5300, 6000, 6700, 7400, 8100, 8800, 9500, 10_200];
+    let mut probe = game::Game::new();
+    probe.reset_at(1);
+    let mut probe_mind = talonhd::ace::Mind::new();
+    let mut shake = None;
+    while probe.ticks < 10_400 && shake.is_none() {
+        let input = talonhd::ace::fly(&mut probe, &mut probe_mind);
+        probe.step(input);
+        if probe.pilot.since_hit == 3 {
+            shake = Some(probe.ticks);
+            ticks.extend([probe.ticks - 3, probe.ticks - 1]);
+        }
+    }
+    ticks.sort();
+    println!("self-check ticks {ticks:?} (shake {shake:?})");
+    for t in ticks {
+        while g.ticks < t {
+            let input = talonhd::ace::fly(&mut g, &mut mind);
+            g.step(input);
+        }
+        let buf = BUFFERS[(t & 1) as usize];
+        let scroll = model::render_game(&mut m, &img, &g, buf);
+        let mut sc = [render::Sprite::default(); game::INSTANCES];
+        let n = game::scene(&g, &mut sc);
+        let k = ((t as u8) >> talonhd::s2::ANIM_SHIFT) as usize & (panos.len() - 1);
+        let mut want = reference::compose(&panos[k], &frames, scroll, &sc[..n]);
+        let pal = game::palette(&g, pano.palette);
+        want.color = vec![pal.color; 1000];
+        want.screen = vec![pal.screen; 1000];
+        check(&m, buf, &want).map_err(|e| format!("t={t}: {e}"))?;
+        png::save(&previews.join(format!("frames_s2/t{t:05}.png")), 320, layout::VISIBLE as u32, &m.visible_with_hud(buf, img.palette.d021, scroll.fine))?;
+    }
+    println!("model matches reference compositor; stats {:?}", m.stats);
+    println!("wrote {} and previews in {}", out.join("talonhd_s2.reu").display(), previews.join("frames_s2").display());
     Ok(())
 }
 
@@ -256,10 +426,12 @@ fn check(m: &Machine, buf: layout::Buffer, want: &reference::Expected) -> Result
 }
 
 fn cmd_preview(args: &Args) -> Result<(), String> {
-    let (mut m, img) = load_image(&args.path("--reu", "dist/talonhd.reu"))?;
+    let default = if args.num("--stage", 1)? == 2 { "dist/talonhd_s2.reu" } else { "dist/talonhd.reu" };
+    let (mut m, img) = load_image(&args.path("--reu", default))?;
     let t = args.num("--t", 0)?;
     let out = args.path("--out", "output/preview.png");
-    let g = game::replay(t as u32);
+    // The attract mode of a C64 booted with this image (its level).
+    let g = game::replay_level(img.level, t as u32);
     let scroll = model::render_game(&mut m, &img, &g, BUFFERS[0]);
     png::save(&out, 320, layout::VISIBLE as u32, &m.visible_with_hud(BUFFERS[0], img.palette.d021, scroll.fine))?;
     println!("t={t}: {:?}", m.stats);
@@ -284,7 +456,7 @@ fn cmd_compare(args: &Args) -> Result<(), String> {
     if st[status::HUMAN as usize] != 0 {
         return Err("a player has taken over: only the attract mode replays on the host".into());
     }
-    let g = game::replay(t as u32);
+    let g = game::replay_level(img.level, t as u32);
     println!("tick {t}: attract-mode replay (score {}, lives {}, stage line {})", g.world.score, g.world.lives, g.world.scroll_lines());
     let scroll: Scroll = model::render_game(&mut m, &img, &g, front);
 
@@ -369,9 +541,103 @@ fn cmd_bake_model(argv: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// A review sheet: rows of frames on the stage's void, 3x (multicolor pixels twice as wide).
+fn save_rows(out: &Path, palette: render::Palette, rows: &[(String, Vec<talonhd::encode::SpriteImage>)]) -> Result<(), String> {
+    let pad = 4usize;
+    let width = rows.iter().map(|r| r.1.iter().map(|f| f.w as usize + pad).sum::<usize>()).max().unwrap_or(1) + pad;
+    let heights: Vec<usize> = rows.iter().map(|r| r.1.iter().map(|f| f.h as usize).max().unwrap_or(0) + pad).collect();
+    let height: usize = heights.iter().sum::<usize>() + pad;
+    let mut px = vec![talonhd::palette::PALETTE[palette.d021 as usize]; width * height];
+    let mut y0 = pad;
+    for (r, (name, row)) in rows.iter().enumerate() {
+        let mut x0 = pad;
+        for f in row {
+            for y in 0..f.h as usize {
+                for x in 0..f.w as usize {
+                    if let Some(c) = f.get(x as u16, y as u16) {
+                        px[(y0 + y) * width + x0 + x] = talonhd::palette::PALETTE[palette.color_of(c) as usize];
+                    }
+                }
+            }
+            x0 += f.w as usize + pad;
+        }
+        println!("row {r}: {name}");
+        y0 += heights[r];
+    }
+    let (sw, sh) = (width * 6, height * 3);
+    let mut big = vec![[0u8; 3]; sw * sh];
+    for y in 0..sh {
+        for x in 0..sw {
+            big[y * sw + x] = px[(y / 3) * width + x / 6];
+        }
+    }
+    png::save(out, sw as u32, sh as u32, &big)?;
+    println!("wrote {}", out.display());
+    Ok(())
+}
+
+/// Layer sprites centred at (x, y) (multicolor px, lines) into one image (the boss assemblies).
+fn layer(w: u16, h: u16, parts: &[(&talonhd::encode::SpriteImage, i32, i32)]) -> talonhd::encode::SpriteImage {
+    let mut img = talonhd::encode::SpriteImage::new(w, h);
+    for &(f, cx, cy) in parts {
+        let (x0, y0) = (cx - f.w as i32 / 2, cy - f.h as i32 / 2);
+        for y in 0..f.h as i32 {
+            for x in 0..f.w as i32 {
+                let (sx, sy) = (x0 + x, y0 + y);
+                if let Some(c) = f.get(x as u16, y as u16) {
+                    if (0..w as i32).contains(&sx) && (0..h as i32).contains(&sy) {
+                        img.set(sx as u16, sy as u16, Some(c));
+                    }
+                }
+            }
+        }
+    }
+    img
+}
+
+/// S2's review sheets under its afternoon sun and palette: `output/lineup/s2.png` (the roster, with the
+/// PEREGRINE for scale) and `output/lineup/s2_bosses.png` (the CAMPANILE's crown over its hub, the
+/// ASTROLABE opening with its rings and lens).
+fn cmd_lineup_s2() -> Result<(), String> {
+    use talonhd::hand_s2 as h2;
+    let sun = talonhd::s2::SUN;
+    let roster: std::collections::BTreeMap<&str, Vec<talonhd::encode::SpriteImage>> = h2::roster().into_iter().collect();
+    let pick = |name: &str, ix: &[usize]| -> (String, Vec<talonhd::encode::SpriteImage>) {
+        (name.to_string(), ix.iter().map(|&i| roster[name][i].clone()).collect())
+    };
+    let peregrine = talonhd::hand::peregrine().render_all_lit(&sun);
+    let rows = vec![
+        ("peregrine".to_string(), vec![peregrine[0].clone(), peregrine[4].clone(), peregrine[8].clone()]),
+        pick("pike", &[0, 2, 4, 6, 8, 12]),
+        pick("kestrel", &[0, 1, 2, 13, 25, 37]),
+        pick("roof_hatch", &[0, 1, 2, 3, 4, 5, 6]),
+        pick("bell_turret", &[0, 2, 4, 8, 16, 18, 20, 24]),
+        pick("dome_mortar", &[0, 1, 2, 3, 6, 8, 16]),
+        pick("wasp", &[1, 13, 25, 37]),
+        pick("pillbox", &[0, 4, 16, 20]),
+    ];
+    save_rows(Path::new("output/lineup/s2.png"), talonhd::s2::PALETTE, &rows)?;
+    let (crown, hub) = (&roster["crown"], &roster["hub"]);
+    let campanile: Vec<_> = (0..4).map(|k| layer(70, 134, &[(&crown[k * 2], 35, 67), (&hub[k], 35, 67)])).collect();
+    let mut astro = Vec::new();
+    for (open, spin) in [(0usize, 0usize), (3, 5), (7, 11)] {
+        let body = &roster["astrolabe"][open];
+        let mut parts = vec![(body, 82, 130)];
+        if open > 0 {
+            parts.push((&roster["ring_outer"][spin], 82, 130));
+            parts.push((&roster["ring_middle"][(16 - spin) % 16], 82, 130));
+            parts.push((&roster["ring_inner"][(spin * 2) % 16], 82, 130));
+            parts.push((&roster["lens"][open % 4], 82, 130));
+        }
+        astro.push(layer(164, 260, &parts));
+    }
+    let rows = vec![("campanile".to_string(), campanile), ("astrolabe".to_string(), astro)];
+    save_rows(Path::new("output/lineup/s2_bosses.png"), talonhd::s2::PALETTE, &rows)
+}
+
 /// Write every hand-built model (`src/hand.rs`) to `assets/models/<id>.mesh`.
 fn cmd_hand_models() -> Result<(), String> {
-    for (id, m) in talonhd::hand::all() {
+    for (id, m) in talonhd::hand::all().into_iter().chain(talonhd::hand_s2::all()) {
         let path = PathBuf::from(format!("assets/models/{id}.mesh"));
         write(&path, mesh::to_text(&m).as_bytes())?;
         println!("{id}: {} triangles, {} vertices -> {}", m.mesh.tris.len(), m.mesh.verts.len(), path.display());
@@ -382,11 +648,15 @@ fn cmd_hand_models() -> Result<(), String> {
 /// The art direction's review sheet: every model in `assets/models` at C64 size, a few orientations
 /// each, on the stage's void color (as in the game), scaled 3x.
 fn cmd_lineup(args: &Args) -> Result<(), String> {
+    if args.opt("--stage") == Some("2") {
+        return cmd_lineup_s2();
+    }
     let pal: Vec<u8> = args.opt("--palette").unwrap_or("6,12,1,3").split(',').map(|c| c.trim().parse::<u8>().map_err(|_| format!("bad color {c}"))).collect::<Result<_, _>>()?;
     let palette = render::Palette::new(pal[0], pal[1], pal[2], pal[3]);
     let out = args.path("--out", "output/lineup/s1.png");
     let mut paths: Vec<PathBuf> = std::fs::read_dir("assets/models").map_err(|e| e.to_string())?.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "mesh")).collect();
     paths.sort();
+    let s2_ids: Vec<String> = talonhd::hand_s2::all().into_iter().map(|(id, _)| id).collect();
     // Rows of (name, frames); each model shows up to 4 evenly spaced orientations.
     let mut rows: Vec<Vec<talonhd::encode::SpriteImage>> = Vec::new();
     let mut names = Vec::new();
@@ -394,6 +664,9 @@ fn cmd_lineup(args: &Args) -> Result<(), String> {
         let m = mesh::load(p)?;
         if m.canvas.0 > 128 || m.name.starts_with("boss.") {
             continue; // bosses get their own sheets
+        }
+        if s2_ids.contains(&m.name) {
+            continue; // S2's roster: `lineup --stage 2`, under its own light
         }
         let all = m.render_all();
         let n = all.len();

@@ -3,7 +3,7 @@ id = "hd.ladder"
 kind = "hd_ladder"
 name = "PROMOTION LADDER"
 status = "approved"
-revision = 2
+revision = 3
 
 # One rung per stage: the palette the stage shows, QUILL's rank while flying it, and the airframe.
 # palette = [void, dark, light, hot] as C64 color indices (00-bible.md [palette]).
@@ -154,3 +154,4 @@ the Lattice is yellow: inside the storm, the crystal glows like the lightning.
 - Approver: fechols (the user)
 - Decision: approved (whole HD layer approved at once, "Approve all, start Ludo")
 - rev 2 (2026-11-01): a `light` (time of day) per stage, lighting both its sprites and its 3D level geometry (user: "each level could have a different time of day"). S1's is the light every approved model already used (no visual change); S2-S8 are drafts pending approval.
+- rev 3 (2026-11-02): S2's light (afternoon, upper right) approved with `hd/models/s2.md` ("Approve, build TERRACES"); S3-S8 remain drafts.

@@ -83,7 +83,7 @@ struct Builder {
 }
 
 /// A stable hash of a lattice point to 0..1: animated details that must not shimmer frame to frame.
-fn hash(a: i64, b: i64, seed: u64) -> f64 {
+pub(crate) fn hash(a: i64, b: i64, seed: u64) -> f64 {
     let mut h = (a as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (b as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F) ^ seed.wrapping_mul(0x1656_67B1_9E37_79F9);
     h ^= h >> 29;
     h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -92,7 +92,7 @@ fn hash(a: i64, b: i64, seed: u64) -> f64 {
 }
 
 /// Smooth value noise over world (`x`, `u`) with cells `sx` × `su`: 0..1.
-fn noise(x: f64, u: f64, sx: f64, su: f64, seed: u64) -> f64 {
+pub(crate) fn noise(x: f64, u: f64, sx: f64, su: f64, seed: u64) -> f64 {
     let (fx, fu) = (x / sx, u / su);
     let (ix, iu) = (fx.floor(), fu.floor());
     let s = |t: f64| t * t * (3.0 - 2.0 * t);

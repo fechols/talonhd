@@ -7,6 +7,7 @@
 //! replays the C64's attract mode to any tick and renders the identical frame.
 
 use crate::boss::Boss;
+use crate::clear::Clear;
 use crate::ground::{self, Ground};
 use crate::midboss::Midboss;
 use crate::demo::{self, *};
@@ -63,11 +64,13 @@ pub struct Game {
     pub ground: Ground,
     /// The attract mode's pilot (`crate::ace`): its plan and stick, replayed with the rest.
     pub ace: crate::ace::Ace,
+    /// The stage clear and the promotion (`crate::clear`): the stage and ship being flown.
+    pub clear: Clear,
 }
 
 impl Game {
     pub const fn new() -> Game {
-        Game { world: World::new(), pilot: Pilot { bank: 0, deaths: 0, since_hit: 255 }, ticks: 0, boss: Boss { state: 0, hp: [0; 4], core: 0, broken: 0, turn: 0, pat: 0, step: 0, timer: 0, sink: 0, aim: [0; 2], wreck_frame: 0, wreck_x: 0, wreck_y: 0 }, midboss: Midboss { state: 0, y: 0, hp: [0; 3], core: 0, clock: 0, turn: 0, pat: 0, step: 0, timer: 0, mines: [crate::midboss::Mine { t: 0, x: 0, y: 0, vx: 0, vy: 0 }; 2], yaw: [0; 3], aim: [0; 2] }, ground: Ground::new(), ace: crate::ace::Ace::new() }
+        Game { world: World::new(), pilot: Pilot { bank: 0, deaths: 0, since_hit: 255 }, ticks: 0, boss: Boss { state: 0, hp: [0; 4], core: 0, broken: 0, turn: 0, pat: 0, step: 0, timer: 0, sink: 0, aim: [0; 2], wreck_frame: 0, wreck_x: 0, wreck_y: 0 }, midboss: Midboss { state: 0, y: 0, hp: [0; 3], core: 0, clock: 0, turn: 0, pat: 0, step: 0, timer: 0, mines: [crate::midboss::Mine { t: 0, x: 0, y: 0, vx: 0, vy: 0 }; 2], yaw: [0; 3], aim: [0; 2] }, ground: Ground::new(), ace: crate::ace::Ace::new(), clear: Clear::new() }
     }
 
     /// Power-on state in place (the C64 keeps `Game` zeroed in BSS and calls this at boot).
@@ -81,16 +84,28 @@ impl Game {
         self.midboss = Midboss::default();
         self.ground = Ground::new();
         self.ace = crate::ace::Ace::new();
+        self.clear = Clear::new();
+    }
+
+    /// Power-on state on the level of the image in the REU (`format::header::LEVEL`): new games start
+    /// there and stay there until the per-level load exists (C64 boot, paged with `reset`).
+    #[inline(never)]
+    pub fn reset_at(&mut self, level: u8) {
+        self.reset();
+        self.clear = Clear::at(level, level);
     }
 
     /// One tick with this tick's input.
     #[inline(never)]
     pub fn step(&mut self, input: u8) {
         self.ticks = self.ticks.wrapping_add(1);
-        self.world.step(input);
+        // The stage clear flies the ship itself: the world sees no stick.
+        self.world.step(if self.clear.holds() { 0 } else { input });
         // The midboss and boss fight logic are paged phases (`crate::paging`), paged in only while active.
         let at = lines(self);
-        if at < crate::midboss::ARRIVE {
+        if self.clear.level != 0 {
+            // Another level's fights (none yet): S1's stay where they were.
+        } else if at < crate::midboss::ARRIVE {
             if self.midboss.state != crate::midboss::ABSENT {
                 self.midboss = Midboss::default();
             }
@@ -99,7 +114,9 @@ impl Game {
             self.midboss.step(&mut self.world);
         }
         // The fight logic is a paged phase (`crate::paging`): only paged in while she is around.
-        if lines(self) < crate::boss::ARRIVE {
+        if self.clear.level != 0 {
+            self.world.boss_ceiling = false;
+        } else if lines(self) < crate::boss::ARRIVE {
             if self.boss.state != crate::boss::ABSENT {
                 self.boss = Boss::default();
             }
@@ -107,18 +124,46 @@ impl Game {
         } else if self.boss.state != crate::boss::GONE {
             crate::paging::page(crate::paging::BOSS);
             self.boss.step(&mut self.world);
+            if matches!(self.boss.state, crate::boss::PHASE1 | crate::boss::PHASE2) {
+                self.clear.fight += 1;
+            }
         } else {
             // She is gone until the next pass: no paging, no step.
             self.world.boss_ceiling = false;
         }
-        // The ground units' step is a paged phase too, paged in only while one is out or due.
+        // The stage clear (paged): from the boss's fall to the next stage's first line.
+        if self.clear.holds() || self.boss.state == crate::boss::DYING {
+            crate::paging::page(crate::paging::STAGE);
+            self.clear.step(&mut self.world, self.boss.state, input);
+        }
+        if self.world.state == GAME_OVER && self.clear.stage != self.clear.first {
+            // A new game starts on the first level with its ship.
+            crate::paging::page(crate::paging::STAGE);
+            self.clear.restart();
+        }
+        // The ground units' step is a paged phase too, paged in only while one is out or due (frozen
+        // through the stage clear, which starts the next stage at its first line). Later levels run
+        // their own units and waves (`crate::stage2`, which holds the vendored sim's S1 track off).
         let at = lines(self);
-        if self.ground.busy(at) {
-            crate::paging::page(crate::paging::GROUND);
-            self.ground.step(&mut self.world, at);
+        if !self.clear.holds() {
+            if self.clear.level != 0 {
+                crate::stage2::run(&mut self.ground, &mut self.world, at);
+            } else if self.ground.busy(at) {
+                crate::paging::page(crate::paging::GROUND);
+                self.ground.step(&mut self.world, at);
+            }
+        }
+        // The stage loops: the world's scroll back to line 0 (its fraction kept), so the scroll is the
+        // stage line. S1's spawn track loops with the stage (its base is a period by now: 0 is the same
+        // place); S2's waves hold it off again on their next step. Byte stores only: no 32-bit math.
+        if lines(self) >= PANO_PERIOD {
+            self.world.scroll &= 0xFF;
+            self.world.track_base = 0;
         }
         let p = &mut self.pilot;
-        let target = if self.world.state != PLAY {
+        let target = if self.clear.holds() {
+            self.clear.bank
+        } else if self.world.state != PLAY {
             0
         } else if input & LEFT != 0 {
             -4
@@ -149,9 +194,10 @@ impl Default for Game {
     }
 }
 
-/// Stage lines travelled, within the looping stage.
+/// Stage lines travelled, within the looping stage (`Game::step` keeps the world's scroll inside one
+/// period: no 32-bit modulo on the 6502).
 fn lines(g: &Game) -> u16 {
-    (g.world.scroll_lines() % PANO_PERIOD as u32) as u16
+    g.world.scroll_lines() as u16
 }
 
 /// The camera shake after the TALON is hit, per frame: on each axis two sines of different frequency
@@ -231,9 +277,10 @@ pub(crate) fn put(out: &mut [Sprite; INSTANCES], n: &mut usize, frame: u16, x: i
     }
 }
 
-/// The stage palette with the fight's recolor (phase 2 turns `hot` yellow).
+/// The stage palette with the fight's recolor (phase 2 turns `hot` yellow), or the stage clear's (the
+/// crystal going dark, the walk to the next stage's colors, and every later stage's).
 pub fn palette(g: &Game, base: Palette) -> Palette {
-    g.boss.palette(base)
+    g.clear.palette(g.boss.palette(base))
 }
 
 /// Fill `out` with this frame's sprites; returns how many.
@@ -290,9 +337,16 @@ pub fn scene(g: &Game, out: &mut [Sprite; INSTANCES]) -> usize {
     let p = &w.player;
     if w.state == PLAY || w.state == LAUNCH {
         let bank = (g.pilot.bank + 4) as u16;
-        // Invincible (respawn or arming): the energy-wave frames instead of a blink.
-        let (frame, sw, sh) = if p.invuln_kind != INV_NONE {
-            let step = (w.tick as u16 / 3) % SHIELD_STEPS;
+        // The ship of this stage: the TALON, then (promoted) the PEREGRINE. Invincible (respawn or
+        // arming): the energy-wave frames instead of a blink.
+        let promoted = g.clear.stage != 0;
+        let step = (w.tick as u16 / 3) % SHIELD_STEPS;
+        let (frame, sw, sh) = if promoted {
+            if p.invuln_kind != INV_NONE {
+                put(out, &mut n, PEREGRINE_SHIELD_FRAME + step, px, py, SHIELD_W, SHIELD_H, Z_PLAYER);
+            }
+            (PEREGRINE_FRAME + bank, PEREGRINE_W, PEREGRINE_H)
+        } else if p.invuln_kind != INV_NONE {
             (SHIELD_FRAME + bank * SHIELD_STEPS + step, SHIELD_W, SHIELD_H)
         } else {
             (PLAYER_FRAME + bank, PLAYER_W, PLAYER_H)
@@ -305,6 +359,10 @@ pub fn scene(g: &Game, out: &mut [Sprite; INSTANCES]) -> usize {
             let (frame, bw, bh) = if b.kind == B_BOMB { (BOMB_FRAME, BOMB_W, BOMB_H) } else { (ROUND_FRAME, ROUND_W, ROUND_H) };
             put(out, &mut n, frame, b.x >> 6, b.y >> 6, bw, bh, Z_BULLET);
         }
+    }
+    if g.clear.card() {
+        crate::paging::page(crate::paging::STAGE);
+        g.clear.sprites(out, &mut n);
     }
     // The camera shake moves everything drawn with the panorama: whole columns here, the rest is XSCROLL.
     let (sx, sy) = shake(g);
@@ -330,7 +388,7 @@ pub fn hud_state(g: &Game) -> hud::State {
         // The sim's cursor is 0 (none) or slot 1..8; the HUD's is slot 0..7 or 8 (none).
         gauge: if w.gauge.cursor == 0 { 8 } else { w.gauge.cursor - 1 },
         speed: w.gauge.speed,
-        stage: 1,
+        stage: g.clear.stage + 1,
         bank: g.pilot.bank,
         tape_l: w.tick as u16,
         tape_r: lines(g),
@@ -344,7 +402,14 @@ pub fn hud_state(g: &Game) -> hud::State {
 /// C64 shows when nobody touches the stick).
 #[cfg(feature = "host")]
 pub fn replay(ticks: u32) -> Game {
+    replay_level(0, ticks)
+}
+
+/// [`replay`] on a C64 booted with level `level`'s image (`Game::reset_at`).
+#[cfg(feature = "host")]
+pub fn replay_level(level: u8, ticks: u32) -> Game {
     let mut g = Game::new();
+    g.reset_at(level);
     let mut mind = crate::ace::Mind::new();
     for _ in 0..ticks {
         let input = crate::ace::fly(&mut g, &mut mind);

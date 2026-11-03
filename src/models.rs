@@ -230,8 +230,95 @@ pub fn demo_frames() -> Vec<SpriteImage> {
     assert_eq!(turret.len(), demo::TURRET_YAWS as usize);
     out.extend(turret);
     out.extend(ground_frames());
+    // The PEREGRINE (hand-built): its banks, then its energy-wave frames.
+    out.extend(peregrine_frames(&raster3d::MORNING));
+    // The cards' lettering.
+    out.extend(crate::font::card_frames());
     assert_eq!(out.len(), demo::FRAMES as usize);
     out
+}
+
+/// The PEREGRINE's 9 banks and its energy waves under `light`: one field around the level bank, without
+/// the hull (the bank frame is drawn over it), so 8 frames instead of 72 (the level image is full).
+pub fn peregrine_frames(light: &raster3d::Light) -> Vec<SpriteImage> {
+    let mut out = crate::hand::peregrine().render_all_lit(light);
+    assert_eq!(out.len(), demo::PLAYER_BANKS as usize);
+    let level = out[demo::PLAYER_BANKS as usize / 2].clone();
+    let mut field = shield_frames(std::slice::from_ref(&level));
+    let (ox, oy) = ((demo::SHIELD_W - level.w) / 2, (demo::SHIELD_H - level.h) / 2);
+    for f in field.iter_mut() {
+        for y in 0..level.h {
+            for x in 0..level.w {
+                if level.get(x, y).is_some() {
+                    f.set(x + ox, y + oy, None);
+                }
+            }
+        }
+    }
+    out.extend(field);
+    out
+}
+
+/// Level `level`'s frame directory (`demo`'s stage block): S1's for 0; for S2 TERRACES the common frames
+/// with the WASP and the PEREGRINE under S2's sun, S1's stage slots blank, and S2's block from 0
+/// (`crate::hand_s2`).
+pub fn stage_frames(level: u8) -> Vec<SpriteImage> {
+    let mut frames = demo_frames_with_assets();
+    if level == 0 {
+        return frames;
+    }
+    assert_eq!(level, 1, "only S1 and S2 are built");
+    let sun = crate::s2::SUN;
+    for i in (demo::BOSS_FRAME..demo::DRONE_FRAME).chain(demo::KEEL_FRAME..demo::PEREGRINE_FRAME) {
+        frames[i as usize] = SpriteImage::new(4, 1);
+    }
+    let wasp = crate::hand::wasp();
+    let view = View::centered(demo::DRONE_W, demo::DRONE_H, 1.0);
+    for i in 0..demo::DRONE_YAWS {
+        let yaw = PI + i as f64 * 2.0 * PI / demo::DRONE_YAWS as f64;
+        frames[(demo::DRONE_FRAME + i) as usize] = raster3d::render_lit(&wasp.mesh, Orient { yaw, pitch: 0.0, roll: 0.0 }, view, &sun);
+    }
+    for (k, f) in peregrine_frames(&sun).into_iter().enumerate() {
+        frames[demo::PEREGRINE_FRAME as usize + k] = f;
+    }
+    let mut block: Vec<SpriteImage> = Vec::new();
+    let roster: std::collections::HashMap<&str, Vec<SpriteImage>> = crate::hand_s2::roster().into_iter().collect();
+    for name in ["pike", "kestrel", "roof_hatch", "bell_turret", "dome_mortar", "pillbox"] {
+        block.extend(roster[name].iter().cloned());
+    }
+    // Wrecks: a crater for the PILLBOX and the BELL TURRET, a larger one for the DOME MORTAR (on their
+    // canvases).
+    block.extend(crate::hand::wreck(20.0).render_all_lit(&sun));
+    block.extend(crate::hand::wreck(21.0).render_all_lit(&sun));
+    for k in 0..demo::SHELL_SIZES {
+        block.push(shell(k));
+    }
+    for name in ["crown", "hub", "astrolabe", "ring_outer", "ring_middle", "ring_inner", "lens"] {
+        block.extend(roster[name].iter().cloned());
+    }
+    assert_eq!(block.len(), demo::S2_FRAMES as usize);
+    for (i, f) in block.into_iter().enumerate() {
+        frames[i] = f;
+    }
+    frames
+}
+
+/// The DOME MORTAR's shell at size `k` (0 small, high: it climbs, then falls): a `dark` ball with a
+/// `hot` crystal core, two lines a multicolor pixel.
+fn shell(k: u16) -> SpriteImage {
+    let (w, h) = (demo::SHELL_W, demo::SHELL_H);
+    let mut img = SpriteImage::new(w, h);
+    let r = [1.2, 1.7, 2.2, 2.8][k as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let (dx, dy) = (x as f64 + 0.5 - w as f64 / 2.0, (y as f64 + 0.5 - h as f64 / 2.0) / 2.0);
+            let d = dx.hypot(dy);
+            if d < r {
+                img.set(x, y, Some(if d < r - 0.9 { HOT } else { DARK }));
+            }
+        }
+    }
+    img
 }
 
 /// The ground and sea units, in [`demo`] order from `SKIFF_FRAME` (hand-built).
