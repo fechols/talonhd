@@ -24,10 +24,11 @@ use crate::sim::{LEFT, RIGHT, World};
 pub const OX: i16 = 4;
 pub const OY: i16 = 8;
 
-/// Every sprite a frame can hold: the boss, the pools of the sim and the TALON.
+/// Every sprite a frame can hold: the boss, the pools of the sim and the TALON. Later levels' fights share
+/// the KEELBREAKER's and QUEEN's slots (`KEEL_SPRITES + QUEEN_SPRITES`; the ASTROLABE's most is 12).
 pub const INSTANCES: usize = ground::UNITS + KEEL_SPRITES + QUEEN_SPRITES + GANNETS + WASPS + SPARKS + BURSTS + EBULLETS + PAIRS + 1;
 /// The KEELBREAKER's hull, three turrets and two mines.
-const KEEL_SPRITES: usize = 6;
+pub(crate) const KEEL_SPRITES: usize = 6;
 
 /// Draw order (low first): boss parts and body (0, 1), then these.
 const Z_GANNET: i16 = 2;
@@ -66,11 +67,15 @@ pub struct Game {
     pub ace: crate::ace::Ace,
     /// The stage clear and the promotion (`crate::clear`): the stage and ship being flown.
     pub clear: Clear,
+    /// S2's midboss (`crate::campanile`).
+    pub campanile: crate::campanile::Campanile,
+    /// S2's boss (`crate::astrolabe`).
+    pub astro: crate::astrolabe::Astrolabe,
 }
 
 impl Game {
     pub const fn new() -> Game {
-        Game { world: World::new(), pilot: Pilot { bank: 0, deaths: 0, since_hit: 255 }, ticks: 0, boss: Boss { state: 0, hp: [0; 4], core: 0, broken: 0, turn: 0, pat: 0, step: 0, timer: 0, sink: 0, aim: [0; 2], wreck_frame: 0, wreck_x: 0, wreck_y: 0 }, midboss: Midboss { state: 0, y: 0, hp: [0; 3], core: 0, clock: 0, turn: 0, pat: 0, step: 0, timer: 0, mines: [crate::midboss::Mine { t: 0, x: 0, y: 0, vx: 0, vy: 0 }; 2], yaw: [0; 3], aim: [0; 2] }, ground: Ground::new(), ace: crate::ace::Ace::new(), clear: Clear::new() }
+        Game { world: World::new(), pilot: Pilot { bank: 0, deaths: 0, since_hit: 255 }, ticks: 0, boss: Boss { state: 0, hp: [0; 4], core: 0, broken: 0, turn: 0, pat: 0, step: 0, timer: 0, sink: 0, aim: [0; 2], wreck_frame: 0, wreck_x: 0, wreck_y: 0 }, midboss: Midboss { state: 0, y: 0, hp: [0; 3], core: 0, clock: 0, turn: 0, pat: 0, step: 0, timer: 0, mines: [crate::midboss::Mine { t: 0, x: 0, y: 0, vx: 0, vy: 0 }; 2], yaw: [0; 3], aim: [0; 2] }, ground: Ground::new(), ace: crate::ace::Ace::new(), clear: Clear::new(), campanile: crate::campanile::Campanile::new(), astro: crate::astrolabe::Astrolabe::new() }
     }
 
     /// Power-on state in place (the C64 keeps `Game` zeroed in BSS and calls this at boot).
@@ -85,6 +90,8 @@ impl Game {
         self.ground = Ground::new();
         self.ace = crate::ace::Ace::new();
         self.clear = Clear::new();
+        self.campanile = crate::campanile::Campanile::new();
+        self.astro = crate::astrolabe::Astrolabe::new();
     }
 
     /// Power-on state on the level of the image in the REU (`format::header::LEVEL`): new games start
@@ -115,7 +122,13 @@ impl Game {
         }
         // The fight logic is a paged phase (`crate::paging`): only paged in while she is around.
         if self.clear.level != 0 {
+            // S2's boss (stepped through the stage clear too: the clear follows its fall).
             self.world.boss_ceiling = false;
+            let a = &mut self.astro;
+            if (at >= crate::astrolabe::ARRIVE && a.state != crate::astrolabe::GONE) || (at < crate::astrolabe::ARRIVE && a.state != crate::astrolabe::ABSENT) {
+                crate::paging::page(crate::paging::ASTRO);
+                a.step(&mut self.world, &mut self.clear, at);
+            }
         } else if lines(self) < crate::boss::ARRIVE {
             if self.boss.state != crate::boss::ABSENT {
                 self.boss = Boss::default();
@@ -132,14 +145,20 @@ impl Game {
             self.world.boss_ceiling = false;
         }
         // The stage clear (paged): from the boss's fall to the next stage's first line.
-        if self.clear.holds() || self.boss.state == crate::boss::DYING {
+        let boss = if self.clear.level != 0 { self.astro.state } else { self.boss.state };
+        if self.clear.holds() || boss == crate::boss::DYING {
             crate::paging::page(crate::paging::STAGE);
-            self.clear.step(&mut self.world, self.boss.state, input);
+            self.clear.step(&mut self.world, boss, input);
         }
         if self.world.state == GAME_OVER && self.clear.stage != self.clear.first {
-            // A new game starts on the first level with its ship.
+            // A new game starts on the first level with its ship (and nothing of a later level's fights).
             crate::paging::page(crate::paging::STAGE);
             self.clear.restart();
+            // S2's fights stop where they are (GONE: not stepped at their hold behind the GAME OVER);
+            // below their lines the new game resets them, with `hot` its own.
+            self.campanile.state = crate::campanile::GONE;
+            self.astro.state = crate::astrolabe::GONE;
+            self.astro.pose = 0;
         }
         // The ground units' step is a paged phase too, paged in only while one is out or due (frozen
         // through the stage clear, which starts the next stage at its first line). Later levels run
@@ -147,7 +166,7 @@ impl Game {
         let at = lines(self);
         if !self.clear.holds() {
             if self.clear.level != 0 {
-                crate::stage2::run(&mut self.ground, &mut self.world, at);
+                crate::stage2::run(self, at);
             } else if self.ground.busy(at) {
                 crate::paging::page(crate::paging::GROUND);
                 self.ground.step(&mut self.world, at);
@@ -290,6 +309,14 @@ pub fn scene(g: &Game, out: &mut [Sprite; INSTANCES]) -> usize {
     let mut n = 0;
     let (px, py) = ((w.player.x >> 8) as i16, (w.player.y >> 8) as i16);
     g.ground.sprites(out, &mut n);
+    if g.campanile.shown() {
+        crate::paging::page(crate::paging::S2);
+        g.campanile.sprites(out, &mut n);
+    }
+    if g.astro.shown() {
+        crate::paging::page(crate::paging::ASTRO);
+        g.astro.sprites(out, &mut n);
+    }
     n += g.midboss.sprites(w, &mut out[n..n + KEEL_SPRITES]);
     n += g.boss.sprites(w, &mut out[n..n + QUEEN_SPRITES]);
     for k in 0..GANNETS {

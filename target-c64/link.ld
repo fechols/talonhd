@@ -48,6 +48,7 @@ MEMORY {
     ph_s2 (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
     ph_s2gnd (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
     ph_s2air (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
+    ph_astro (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
     /* Load addresses of every phase but BOOT: outside the PRG (OUTPUT_FORMAT writes ram and hiload
      * only). scripts/build-target.sh extracts them to dist/phases/<name>.bin; bake puts them in the
      * level REU image, and boot copies them to the phase bank (main.rs install_phases). */
@@ -135,6 +136,8 @@ SECTIONS {
     .phase.s2 : {
         *(.text._ZN7talonhd6stage2*)
         *(.rodata._ZN7talonhd6stage2*)
+        *(.text._ZN7talonhd9campanile*)
+        *(.rodata._ZN7talonhd9campanile*)
     } >ph_s2 AT>phimg
     .phase.s2gnd : {
         *(.text._ZN7talonhd4gnd2*)
@@ -144,6 +147,10 @@ SECTIONS {
         *(.text._ZN7talonhd4air2*)
         *(.rodata._ZN7talonhd4air2*)
     } >ph_s2air AT>phimg
+    .phase.astro : {
+        *(.text._ZN7talonhd9astrolabe*)
+        *(.rodata._ZN7talonhd9astrolabe*)
+    } >ph_astro AT>phimg
 }
 __phase_boot_load_start = LOADADDR(.phase.boot);
 __phase_boot_size = SIZEOF(.phase.boot);

@@ -19,6 +19,8 @@ default = []
 rust-columns = []
 # Debug: the attract game starts at stage line `START_LINE` (e.g. just before a midboss) to bisect faults.
 start-keel = []
+# Debug (with the S2 image): the attract game starts just before the ASTROLABE, the CAMPANILE behind it.
+start-boss = []
 # Show render time as a border color bar.
 raster-bars = []
 # Time the frame's music service and game step into the status block (AUDIO_US, STEP_US).

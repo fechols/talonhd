@@ -14,6 +14,8 @@ pub mod ace;
 pub mod air2;
 pub mod audio;
 pub mod boss;
+pub mod astrolabe;
+pub mod campanile;
 pub mod clear;
 pub mod demo;
 pub mod format;

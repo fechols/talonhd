@@ -404,18 +404,18 @@ fn rate(g: &Game, kind: u8, i: usize, px: i16, py: i16, out: &mut Aim) -> i16 {
             (u.px, u.py, 0, 30)
         }
         T_BOSS => {
-            let b = &g.boss;
-            if (b.state != crate::boss::PHASE1 && b.state != crate::boss::PHASE2) || b.aim[1] == NO_AIM {
+            let (state, aim) = boss(g);
+            if (state != crate::boss::PHASE1 && state != crate::boss::PHASE2) || aim[1] == NO_AIM {
                 return i16::MIN;
             }
-            (b.aim[0], b.aim[1], 0, 400)
+            (aim[0], aim[1], 0, 400)
         }
         T_KEEL => {
-            let b = &g.midboss;
-            if (b.state != crate::midboss::PHASE1 && b.state != crate::midboss::PHASE2) || b.aim[1] == NO_AIM {
+            let (state, aim) = midboss(g);
+            if (state != crate::midboss::PHASE1 && state != crate::midboss::PHASE2) || aim[1] == NO_AIM {
                 return i16::MIN;
             }
-            (b.aim[0], b.aim[1], 0, 400)
+            (aim[0], aim[1], 0, 400)
         }
         _ => return i16::MIN,
     };
@@ -424,6 +424,19 @@ fn rate(g: &Game, kind: u8, i: usize, px: i16, py: i16, out: &mut Aim) -> i16 {
     }
     *out = Aim { x, y, vx };
     y - ((x - px).abs() >> 1) + bonus
+}
+
+/// This level's boss: its state (the GANTRY QUEEN's numbers; the ASTROLABE shares them) and aim.
+/// Inlined: called from the ATTRACT phase and the ACE phase alike.
+#[inline(always)]
+fn boss(g: &Game) -> (u8, [i16; 2]) {
+    if g.clear.level == 0 { (g.boss.state, g.boss.aim) } else { (g.astro.state, g.astro.aim) }
+}
+
+/// This level's midboss: its state (the KEELBREAKER's numbers; the CAMPANILE shares them) and aim.
+#[inline(always)]
+fn midboss(g: &Game) -> (u8, [i16; 2]) {
+    if g.clear.level == 0 { (g.midboss.state, g.midboss.aim) } else { (g.campanile.state, g.campanile.aim) }
 }
 
 /// Whether any enemy is on screen: a WASP or GANNET in the playfield, a live ground unit in view, or a
@@ -457,7 +470,7 @@ fn enemies_on_screen(g: &Game) -> bool {
         }
         i += 1;
     }
-    let (b, k) = (g.boss.state, g.midboss.state);
+    let (b, k) = (boss(g).0, midboss(g).0);
     b == crate::boss::PHASE1 || b == crate::boss::PHASE2 || k == crate::midboss::PHASE1 || k == crate::midboss::PHASE2
 }
 

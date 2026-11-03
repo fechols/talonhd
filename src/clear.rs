@@ -3,7 +3,7 @@
 //! `docs/story/hd/01-art-direction.md`):
 //!
 //! 1. DARK: the boss falls; the waves stop, enemy bullets clear, the ship can no longer be hit and the
-//!    stick is ignored; `hot` steps down to grey while her wreck drifts off.
+//!    stick is ignored; `hot` steps down to grey, then the stage's `dark`, while her wreck drifts off.
 //! 2. FLYOUT: the ship eases to the centre and climbs off the top of the screen, faster and faster.
 //! 3. CARD: the stage-clear card, a line at a time (the rank, BRANDT's line, QUILL's reply), then the
 //!    tally (BOSS TIME, CLEAN AIRFRAME) counting into the score at 1,000 a tick, then a 90-tick hold
@@ -46,13 +46,16 @@ pub const PALETTES: [[u8; 4]; 8] = [
 ];
 
 /// The S1 GANTRY QUEEN's time bonus (`05-bosses/s1-gantry-queen.md` `time_bonus`): the full amount
-/// within `PAR` ticks (60 s), falling linearly to 0 at twice that.
-pub const BOSS_MAX: u16 = 30_000;
+/// within `PAR` ticks (60 s), falling linearly to 0 at twice that. S2's ASTROLABE: 40,000 within 70 s.
+/// The tally counts in hundreds (every bonus is a multiple of 100), so a later stage's 70,000+ fits a u16.
+pub const BOSS_MAX: u16 = 300;
 pub const PAR: u16 = 3_600;
-/// CLEAN AIRFRAME: 10,000 × the stage number when no ship was lost this stage.
-pub const CLEAN: u16 = 10_000;
-/// Tally speed (points a tick) and the card's hold after it.
-pub const TALLY_STEP: u16 = 1_000;
+pub const BOSS_MAX2: u16 = 400;
+pub const PAR2: u16 = 4_200;
+/// CLEAN AIRFRAME: 10,000 × the stage number when no ship was lost this stage (in hundreds).
+pub const CLEAN: u16 = 100;
+/// Tally speed (hundreds a tick: 1,000 points) and the card's hold after it.
+pub const TALLY_STEP: u16 = 10;
 pub const HOLD: u16 = 90;
 /// Ticks between card lines appearing, between palette steps.
 pub const LINE_TICKS: u16 = 6;
@@ -228,8 +231,9 @@ impl Clear {
             }
             DARK => {
                 self.hold(w);
-                if self.t % DARK_TICKS == 0 && (self.steps as usize) < NODE_DARK.len() {
-                    self.pal[3] = NODE_DARK[self.steps as usize];
+                if self.t % DARK_TICKS == 0 && self.steps < 2 {
+                    // `fx.node_dark`: the yellow crystal greys out (15), then goes to the stage's `dark`.
+                    self.pal[3] = if self.steps == 0 { 15 } else { self.pal[1] };
                     self.steps += 1;
                 }
                 // The wreck is well on its way down (it sinks on through the fly-out and the card).
@@ -267,17 +271,16 @@ impl Clear {
             CARD => {
                 self.hold(w);
                 let total = self.boss_bonus + self.clean_bonus;
-                if fire {
-                    w.add_score((total - self.counted) as u32);
-                    self.counted = total;
-                    self.next(WALK);
-                } else if self.t >= CLEAR_LINES * LINE_TICKS {
-                    if self.counted < total {
-                        let add = if total - self.counted > TALLY_STEP { TALLY_STEP } else { total - self.counted };
-                        w.add_score(add as u32);
+                if fire || self.t >= CLEAR_LINES * LINE_TICKS {
+                    // Fire counts the rest at once and moves on.
+                    let left = total - self.counted;
+                    if left != 0 {
+                        let add = if fire || left <= TALLY_STEP { left } else { TALLY_STEP };
+                        score(w, add);
                         self.counted += add;
                         self.t = CLEAR_LINES * LINE_TICKS;
-                    } else if self.t >= CLEAR_LINES * LINE_TICKS + HOLD {
+                    }
+                    if fire || (left == 0 && self.t >= CLEAR_LINES * LINE_TICKS + HOLD) {
                         self.next(WALK);
                     }
                 }
@@ -326,7 +329,7 @@ impl Clear {
         self.pal = PALETTES[self.stage as usize & 7];
         self.pal[3] = crate::boss::PHASE2_HOT;
         self.pal_on = true;
-        self.boss_bonus = boss_time(self.fight);
+        self.boss_bonus = boss_time(self.fight, self.level);
         self.clean_bonus = if w.deaths == self.deaths0 { CLEAN * (self.stage as u16 + 1) } else { 0 };
         for b in w.ebullets.iter_mut() {
             b.kind = 0;
@@ -394,9 +397,6 @@ fn next_palette(s: u8) -> [u8; 4] {
     PALETTES[(s as usize + 1) & 7]
 }
 
-/// `fx.node_dark` for S1: the yellow phase-2 crystal greys out, 7 -> 15 -> 12 (`dark`).
-const NODE_DARK: [u8; 2] = [15, 12];
-
 /// The ship's x at the centre of the playfield and the line above which it has left the screen.
 const CENTRE_X: i32 = 152;
 const OFF_TOP: i16 = -48;
@@ -432,23 +432,33 @@ fn toward(a: u8, b: u8) -> u8 {
     }
 }
 
-/// BOSS TIME for a fight of `t` ticks: the full bonus up to par, nothing at twice par, in hundreds
-/// between (a subtraction loop: no divides on the 6502).
-fn boss_time(t: u16) -> u16 {
-    if t <= PAR {
-        return BOSS_MAX;
+/// BOSS TIME for a fight of `t` ticks on `level`: the full bonus up to par, nothing at twice par, in
+/// steps between (a subtraction loop: no divides on the 6502): S1 100 every 12 ticks, S2 200 every 21.
+/// In hundreds.
+fn boss_time(t: u16, level: u8) -> u16 {
+    let (par, max, every, points) = if level == 0 { (PAR, BOSS_MAX, 12, 1) } else { (PAR2, BOSS_MAX2, 21, 2) };
+    if t <= par {
+        return max;
     }
-    if t >= 2 * PAR {
+    if t >= 2 * par {
         return 0;
     }
-    // (2 * PAR - t) / 12 hundreds: 300 at par.
-    let mut left = 2 * PAR - t;
-    let mut h = 0u16;
-    while left >= 12 {
-        left -= 12;
-        h += 1;
+    let mut left = 2 * par - t;
+    let mut v = 0u16;
+    while left >= every {
+        left -= every;
+        v += points;
     }
-    h * 100
+    v
+}
+
+/// `hundreds` × 100 points into the score (no 32-bit multiply on the 6502).
+#[inline(always)]
+fn score(w: &mut World, mut hundreds: u16) {
+    while hundreds != 0 {
+        w.add_score(100);
+        hundreds -= 1;
+    }
 }
 
 /// Append a sprite at screen position (`x`, `y`) (multicolor px, lines), in front of everything.
@@ -463,24 +473,29 @@ fn put_raw(out: &mut [Sprite; INSTANCES], n: &mut usize, frame: u16, x: i16, y: 
 /// In front of everything (`game`'s draw order ends at 8).
 const Z_CARD: i16 = 9;
 
-/// `value` right-aligned at the card's right edge on the line at `y`, with thousands commas.
+/// `value` hundreds (its points: the digits, then `00`) right-aligned at the card's right edge on the
+/// line at `y`, with thousands commas.
 #[inline(never)]
 fn number(out: &mut [Sprite; INSTANCES], n: &mut usize, value: u16, y: i16) {
     let mut x = CARD_X + TALLY_RIGHT as i16 - DIGIT_W as i16;
     let mut v = value;
-    let mut k = 0;
+    // 0 is a lone 0 (no hundreds' zeros).
+    let mut k = if v == 0 { 2u8 } else { 0 };
     loop {
-        // The last digit: a subtraction loop (no divides on the 6502).
-        let mut q = 0u16;
-        while v >= 10 {
-            v -= 10;
-            q += 1;
+        // The digits from the right: the hundreds' two zeros, then the value's last digit by a
+        // subtraction loop (no divides on the 6502).
+        let mut d = 0u16;
+        if k >= 2 {
+            while v >= 10 {
+                v -= 10;
+                d += 1;
+            }
+            core::mem::swap(&mut v, &mut d);
         }
-        put_raw(out, n, DIGIT_FRAME + v, x, y + 1);
+        put_raw(out, n, DIGIT_FRAME + d, x, y + 1);
         x -= DIGIT_W as i16 + 1;
-        v = q;
         k += 1;
-        if v == 0 {
+        if k > 2 && v == 0 {
             break;
         }
         if k == 3 {
@@ -490,10 +505,12 @@ fn number(out: &mut [Sprite; INSTANCES], n: &mut usize, value: u16, y: i16) {
     }
 }
 
-/// The cards' text (host: baked into the frames from `CARD_FRAME`). A leading `~` draws the line in
-/// `dark` (speakers, the stage's subtitle); everything else is `light` on a `void` plate.
+/// The cards' text per level image (host: baked into the frames from `CARD_FRAME`): the level's clear,
+/// then the next stage's card. A leading `~` draws the line in `dark` (speakers, the stage's subtitle);
+/// everything else is `light` on a `void` plate. Lines from `01-story.md` (cards), `hd/02-ladder.md`
+/// (rank, BRANDT's line, QUILL's reply), wrapped at 19 characters.
 #[cfg(feature = "host")]
-pub const CARD_TEXT: [&str; (CLEAR_LINES + STAGE_LINES) as usize] = [
+pub const CARD_TEXT: [[&str; (CLEAR_LINES + STAGE_LINES) as usize]; 2] = [[
     "BREAKWATER IS OURS.",
     "THE CRYSTAL GOES",
     "DARK.",
@@ -519,7 +536,33 @@ pub const CARD_TEXT: [&str; (CLEAR_LINES + STAGE_LINES) as usize] = [
     "TELESCOPE INTO A",
     "GUN. CLOSE THE",
     "OBSERVATORY, QUILL.",
-];
+], [
+    "TERRACES IS OURS.",
+    "THE CRYSTAL GOES",
+    "DARK.",
+    "PROMOTED: LT COL.",
+    "~BRANDT:",
+    "LIEUTENANT COLONEL.",
+    "THE ELEVEN WAS",
+    "BUILT FOR THE",
+    "DESERT. SO ARE YOU",
+    "NOW.",
+    "~QUILL:",
+    "I'LL PACK",
+    "SUNSCREEN.",
+    "",
+    "<BOSS TIME",
+    "<CLEAN AIRFRAME",
+    "<TOTAL",
+    "STAGE 3",
+    "REDLINE",
+    "~DESERT CANYON",
+    "~RAILWAY",
+    "EVERY TRAIN ON",
+    "THAT LINE CARRIES",
+    "THEIR POWER. CUT",
+    "THE LINE.",
+]];
 
 #[cfg(test)]
 mod tests {
@@ -552,11 +595,52 @@ mod tests {
 
     #[test]
     fn boss_time_falls_from_par_to_twice_par() {
-        assert_eq!(boss_time(0), 30_000);
-        assert_eq!(boss_time(PAR), 30_000);
-        assert_eq!(boss_time(PAR + 1800), 15_000);
-        assert_eq!(boss_time(2 * PAR - 1), 0);
-        assert_eq!(boss_time(2 * PAR), 0);
+        assert_eq!(boss_time(0, 0), 300);
+        assert_eq!(boss_time(PAR, 0), 300);
+        assert_eq!(boss_time(PAR + 1800, 0), 150);
+        assert_eq!(boss_time(2 * PAR - 1, 0), 0);
+        assert_eq!(boss_time(2 * PAR, 0), 0);
+        assert_eq!(boss_time(PAR2, 1), 400);
+        assert_eq!(boss_time(PAR2 + 1, 1), 398);
+        assert_eq!(boss_time(PAR2 + 2100, 1), 200);
+        assert_eq!(boss_time(2 * PAR2 - 1, 1), 0);
+    }
+
+    /// Tally values are hundreds: drawn with their two zeros and a thousands comma (a total stays under
+    /// a million: 40,000 BOSS TIME + 10,000 × stage 8).
+    #[test]
+    fn numbers_read_in_hundreds() {
+        for (v, want) in [(0, "0"), (7, "700"), (10, "1,000"), (398, "39,800"), (700, "70,000"), (1_200, "120,000")] {
+            let (mut out, mut n) = ([Sprite::default(); INSTANCES], 0);
+            number(&mut out, &mut n, v, 0);
+            let got: String = out[..n].iter().rev().map(|s| if s.frame == DIGIT_FRAME + 10 { ',' } else { (b'0' + (s.frame - DIGIT_FRAME) as u8) as char }).collect();
+            assert_eq!(got, want);
+        }
+    }
+
+    /// A deathless, fast stage-3 clear on S2 is worth 70,000 (over a u16 in points): the tally counts it
+    /// all into the score, tick by tick or skipped with Fire; the crystal goes dark in its stage's `dark`.
+    #[test]
+    fn the_tally_holds_a_stage_3_clear() {
+        for skip in [false, true] {
+            let mut w = World::new();
+            let mut c = Clear::at(1, 1);
+            c.stage = 2;
+            c.step(&mut w, crate::boss::DYING, 0);
+            assert_eq!(c.phase, DARK);
+            let mut t = 0;
+            while c.phase != WALK {
+                let fire = skip && c.phase == CARD && c.t > CLEAR_LINES * LINE_TICKS && t % 2 == 0;
+                c.step(&mut w, crate::boss::GONE, if fire { FIRE } else { 0 });
+                if c.phase == DARK && c.steps == 2 {
+                    assert_eq!(c.pal[3], PALETTES[2][1], "S3's dark");
+                }
+                t += 1;
+                assert!(t < 5_000, "phase {}", c.phase);
+            }
+            assert_eq!((c.boss_bonus, c.clean_bonus), (BOSS_MAX2, 3 * CLEAN));
+            assert_eq!(w.score, 70_000, "skip {skip}");
+        }
     }
 
     /// From the GANTRY QUEEN's last hit to play on stage 2: the bonuses go into the score once, the
@@ -605,8 +689,8 @@ mod tests {
         assert_eq!(g.clear.pal, PALETTES[1]);
         assert_eq!(g.world.state, PLAY);
         assert_eq!(g.world.deaths, deaths, "nobody died in the sequence");
-        let bonus = (g.clear.boss_bonus + g.clear.clean_bonus) as u32;
-        assert!(bonus >= CLEAN as u32 || deaths > 0);
+        let bonus = (g.clear.boss_bonus + g.clear.clean_bonus) as u32 * 100;
+        assert!(bonus >= CLEAN as u32 * 100 || deaths > 0);
         // Extends can add a full-stock bonus; none at these scores.
         assert_eq!(g.world.score, score + bonus);
         assert_eq!(g.world.scroll_lines(), 0, "stage 2 starts at its first line");

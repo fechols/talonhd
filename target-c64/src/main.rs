@@ -327,6 +327,11 @@ pub extern "C" fn main() -> i16 {
         g.world.scroll = (talonhd::midboss::ARRIVE as u32 - 20) << 8;
         g.world.track_base = 1_000_000;
     }
+    #[cfg(feature = "start-boss")]
+    {
+        g.world.scroll = (talonhd::astrolabe::HOLD as u32 - 10) << 8;
+        g.campanile.state = talonhd::campanile::GONE;
+    }
     #[allow(static_mut_refs)]
     let sprites = unsafe { &mut SPRITES };
     render::hud_update(c, &game::hud_state(g));

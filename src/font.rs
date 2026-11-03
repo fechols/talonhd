@@ -147,9 +147,10 @@ pub fn digits() -> Vec<SpriteImage> {
         .collect()
 }
 
-/// Every card frame, in `demo` order from `CARD_FRAME`: the lines, the edge, the digits.
-pub fn card_frames() -> Vec<SpriteImage> {
-    let mut out: Vec<SpriteImage> = crate::clear::CARD_TEXT.iter().map(|t| card_line(t)).collect();
+/// Every card frame of level `level`'s image, in `demo` order from `CARD_FRAME`: the lines, the edge,
+/// the digits.
+pub fn card_frames(level: u8) -> Vec<SpriteImage> {
+    let mut out: Vec<SpriteImage> = crate::clear::CARD_TEXT[level as usize].iter().map(|t| card_line(t)).collect();
     out.push(edge());
     out.extend(digits());
     out
@@ -162,7 +163,7 @@ mod tests {
     /// Every card line fits its plate and every character has a glyph; the cards fit the playfield.
     #[test]
     fn the_card_fits() {
-        for t in crate::clear::CARD_TEXT {
+        for t in crate::clear::CARD_TEXT.iter().flatten() {
             let s = t.trim_start_matches(['~', '<']);
             assert!(s.chars().all(|c| glyph(c).is_some()), "{t:?}");
             assert!(width(s) <= MAX_TEXT, "{t:?} is {} px", width(s));
@@ -180,7 +181,7 @@ mod tests {
         // The longest tally label and a five-digit value with its comma do not touch.
         let label = crate::clear::TALLY_LEFT + width("CLEAN AIRFRAME");
         assert!(label + 2 <= crate::clear::TALLY_RIGHT - width("10,000"));
-        let f = card_frames();
+        let f = card_frames(1);
         assert_eq!(f.len() as u16, crate::demo::CARD_LINES + 1 + crate::demo::DIGITS);
     }
 }

@@ -372,16 +372,53 @@ fn cmd_bake_s2(args: &Args) -> Result<(), String> {
     probe.reset_at(1);
     let mut probe_mind = talonhd::ace::Mind::new();
     let mut shake = None;
-    while probe.ticks < 10_400 && shake.is_none() {
+    // The CAMPANILE: its fight, a chime (`hot` lit), phase 2 with the hub open, the crown shattering.
+    let (mut phase1, mut chime, mut phase2, mut dying) = (None, None, None, None);
+    use talonhd::campanile as camp;
+    // The ASTROLABE: the shutters opening, a lane's guide, a volley, phase 2 in yellow, its fall, the
+    // shutters closing; then the clear card in TERRACES' words.
+    use talonhd::astrolabe as astro;
+    let mut boss: [Option<u32>; 7] = [None; 7];
+    let first = |slot: &mut Option<u32>, hit: bool, t: u32| {
+        if hit && slot.is_none() {
+            *slot = Some(t);
+        }
+    };
+    while probe.ticks < 24_000 && (shake.is_none() || dying.is_none() || boss[6].is_none()) {
         let input = talonhd::ace::fly(&mut probe, &mut probe_mind);
         probe.step(input);
-        if probe.pilot.since_hit == 3 {
+        if probe.pilot.since_hit == 3 && shake.is_none() {
             shake = Some(probe.ticks);
             ticks.extend([probe.ticks - 3, probe.ticks - 1]);
         }
+        let c = &probe.campanile;
+        if c.state == camp::PHASE1 && phase1.is_none() {
+            phase1 = Some(probe.ticks + 100);
+        }
+        if c.flash == 2 && chime.is_none() {
+            chime = Some(probe.ticks);
+        }
+        if c.state == camp::PHASE2 && c.pose == 3 && phase2.is_none() {
+            phase2 = Some(probe.ticks + 30);
+        }
+        if c.state == camp::DYING && dying.is_none() {
+            dying = Some(probe.ticks + 10);
+        }
+        let (a, t) = (&probe.astro, probe.ticks);
+        first(&mut boss[0], a.state == astro::ENTERING && a.pose == 4, t);
+        first(&mut boss[1], a.fighting() && a.step == 0 && a.timer == 20 && a.turn == 1, t);
+        first(&mut boss[2], a.fighting() && a.turn == 2 && a.step == 0 && a.timer == 0 && a.pat != 0xFF, t + 4);
+        first(&mut boss[3], a.state == astro::PHASE2 && a.pose == 7 && a.timer == 0, t + 30);
+        first(&mut boss[4], a.state == astro::DYING, t + 20);
+        first(&mut boss[5], a.state == astro::WRECK && a.pose == 4, t);
+        first(&mut boss[6], probe.clear.phase == talonhd::clear::CARD && probe.clear.t == 150, t);
     }
+    ticks.extend([phase1, chime, phase2, dying].into_iter().flatten());
+    ticks.extend(boss.into_iter().flatten());
+    println!("ASTROLABE probes (opening, lane guide, volley, phase 2, fall, closing, card): {boss:?}");
     ticks.sort();
-    println!("self-check ticks {ticks:?} (shake {shake:?})");
+    ticks.dedup();
+    println!("self-check ticks {ticks:?} (shake {shake:?}, campanile {phase1:?}, chime {chime:?}, phase 2 {phase2:?}, shatter {dying:?})");
     for t in ticks {
         while g.ticks < t {
             let input = talonhd::ace::fly(&mut g, &mut mind);

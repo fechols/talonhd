@@ -120,6 +120,20 @@ pub const MORTAR_W: u16 = 24;
 pub const MORTAR_H: u16 = 48;
 pub const SHELL_W: u16 = 6;
 pub const SHELL_H: u16 = 12;
+pub const CROWN_W: u16 = 64;
+pub const CROWN_H: u16 = 128;
+pub const HUB_W: u16 = 24;
+pub const HUB_H: u16 = 48;
+pub const ASTRO_W: u16 = 160;
+pub const ASTRO_H: u16 = 256;
+pub const RING_OUTER_W: u16 = 120;
+pub const RING_OUTER_H: u16 = 240;
+pub const RING_MIDDLE_W: u16 = 88;
+pub const RING_MIDDLE_H: u16 = 176;
+pub const RING_INNER_W: u16 = 56;
+pub const RING_INNER_H: u16 = 112;
+pub const LENS_W: u16 = 24;
+pub const LENS_H: u16 = 48;
 
 pub const BOSS_SIZE: u16 = 512;
 /// Screen line of the boss canvas centre: it hovers at the top, mostly above the screen.

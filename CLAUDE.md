@@ -70,6 +70,7 @@ python tools/check_phases.py             # REU paging audit: resident code enter
                                          # phase's calls/jumps land only on its own functions (phases share addresses)
 python tools/emu64.py --frames 160       # the real PRG in a 6502 + REU + $01 model: finds 6502-only faults
 pwsh scripts/build-windows.ps1 -Features start-keel   # debug: the attract game starts just before the midboss
+pwsh scripts/build-windows.ps1 -Features start-boss   # debug (S2 image, bake it after): just before the ASTROLABE
 ```
 
 Always run `tools/test_blit.py` and `tools/test_sprite.py` (after a bake) after touching `target-c64/asm/blit.S`; write
@@ -148,7 +149,8 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   `motor`; ATTRACT, MOTOR and ACE are each paged once every attract tick), `STAGE` (the stage clear's
   step, and at render time `Clear::sprites` while a card shows), and S2's three: `S2` (`stage2::waves`:
   placements and WASP strings, paged only while one is due), `S2GND` (`gnd2::step`, while `Ground::gnd`) and
-  `S2AIR` (`air2::step`, while `Ground::air`), paged by the resident `stage2::run`. A phase
+  `S2AIR` (`air2::step`, while `Ground::air`), paged by the resident `stage2::run`; and `ASTRO` (the
+  ASTROLABE's step, from `Game::step`, and its render-time `sprites`, from `game::scene`). A phase
   may call resident code only. Link with `--no-check-sections` (phases overlap by design); build with
   `-Zmerge-functions=disabled -Zno-jump-tables` (`target-c64/.cargo/config.toml`): LLVM folded identical
   `aim` functions into one copy in the BOSS phase and resident code called it while another phase was in
@@ -156,10 +158,11 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   `.phase.*` section, its symbols in `main.rs`, its entry in `check_phases.py` `ENTRIES`. 6502 math: avoid
   i32 multiplies in per-frame code (turret aiming cost 3 ms each until it went 16-bit, in the step).
 - **Stage clear and promotion** (`src/clear.rs`, `Game::clear`, paged `STAGE`; user: "Let's make the next
-  stage!"): when the boss falls, `hot` greys out (`fx.node_dark`), waves and bullets stop, the stick is
+  stage!"): when the boss falls, `hot` greys out to the stage's own `dark` (`fx.node_dark`), waves and bullets stop, the stick is
   ignored; the ship eases to centre and climbs off the top; the stage-clear card (rank, BRANDT's line,
-  QUILL's reply, BOSS TIME + CLEAN AIRFRAME counting into the score at 1,000 a tick, Fire skips); the
-  palette walks to the next stage's colors (`fx.promotion_walk`, `clear::toward`: through the luminance
+  QUILL's reply, BOSS TIME + CLEAN AIRFRAME counting into the score at 1,000 a tick, Fire skips; the
+  tally is kept in hundreds, so a later stage's 70,000+ fits a u16, and banked an `add_score(100)` at a
+  time: no 32-bit multiply); the palette walks to the next stage's colors (`fx.promotion_walk`, `clear::toward`: through the luminance
   groups' greys, void first, hot last, a step every 8 ticks) while the next airframe (the hand-built
   PEREGRINE, `hand::peregrine`, TALON handling for now) climbs in; the next stage's card; then play from
   line 0 (`start_stage`). Until S2 exists that is BREAKWATER again in S2's palette (`clear::PALETTES`).
@@ -213,8 +216,34 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   last 20 ticks, then the sim's own shootable `B_BOMB`), S2's PILLBOX, WASP strings along the sim's own
   curves. The vendored sim's S1 track is held off (`track_base`); air units ram the ship by putting a WASP on
   it (the sim's own collision). The world's scroll wraps at `PANO_PERIOD` (`Game::step`), so the stage line
-  is the scroll, never a 32-bit modulo. Music: `assets/music/cue.stage_s2.dlt`. Not yet: the CAMPANILE, the
-  ASTROLABE, S2's clear, the per-level load. Tests: `stage2::tests` (ACE flies S2: 0 deaths).
+  is the scroll, never a 32-bit modulo. Music: `assets/music/cue.stage_s2.dlt`. Not yet: the per-level
+  load (after S2's clear the C64 plays TERRACES again as stage 3 in S3's colors, as S1 did before S2).
+  A game over on a later stage sets S2's fights GONE (not stepped at their hold behind the GAME OVER;
+  below their lines the new game resets them, `hot` its own).
+  Tests: `stage2::tests` (ACE flies S2 through both fights and the clear: 0 deaths, 13,049 ticks).
+- **CAMPANILE** (`src/campanile.rs`, S2 midboss; its step and render-time `sprites` live in the S2 phase, the
+  sprites paged by `game::scene` only while it is shown): the tower is level geometry, the crown (8 spin
+  samples, a clock-hand step every 6 ticks, every 2 winding up for a ring, reversed in phase 2) and the hub
+  are sprites. The scroll holds at line 2368 (a constant store) until it falls. Phase 1: CHIME RING (8
+  shards from the points) and SPOKE (a glowing point, then 5 shots). Phase 2: the hub opens and DOUBLE
+  PEAL. The chime flips `Clear::pal`'s `hot` to `light` for 2 frames. HP: the bible's 56 + 24, tripled for
+  TWIN (ACE took 4 s at bible HP; now 12 s). 12,000 points, 3 SPARKs. `the_campanile_can_be_silenced`;
+  the S2 bake probes the fight.
+- **ASTROLABE** (`src/astrolabe.rs`, S2 boss, paged `ASTRO`: step and render-time `sprites`, 4,091 of
+  4,096 B): the great dome is level geometry with its shutters shut; the fight draws the body (8 shutter
+  poses), the live rings over it (16 spins each) and the lens, only while the shutters are apart
+  (`shown`: `pose != 0`). The scroll holds at 4872 (dome centre on playfield line 64). TWIN bolts hit the
+  first live band they fly into (squared distance, 16-bit: `part_at`). Phase 1: rings 105 HP each (the
+  bible's 35, tripled as the CAMPANILE's); SIGHT LANE (rings align, dotted guide, a lane of rounds
+  sweeping 96 px from the ship's outer side toward the centre, so it stays on the field), RING VOLLEY (6 from a ring's notches, turned with its spin), LENS FLARE (an 8-round
+  cone; the lens open 60 ticks, down to two thirds: clamped after each tick's bolts); DOME MORTARS are the arena's own units. Phase 2 (all
+  rings down): `Clear::pal`'s `hot` yellow, lens 225 HP, the shutters half-close between attacks; PINCER
+  LANES, STARBURST, LENS FLARE. 40,000 points, then the shutters close; its state uses the QUEEN's numbers,
+  so `Game::step` hands the clear whichever boss the level has (BOSS TIME: 40,000 within 70 s on S2).
+  S2's card lines (`clear::CARD_TEXT[1]`: TERRACES' clear, LT COLONEL, S3's card) are baked into the S2
+  image's card frames. `the_astrolabe_can_be_closed` (through the clear into stage 3); ACE fights it for
+  ~34 s; the S2 bake probes opening, lane, volley, phase 2, fall, closing and the card. Not yet: shattered
+  ring frames (a destroyed ring vanishes in bursts).
 - **Ground units** (`src/ground.rs`, paged): SKIFF, PILLBOX, HATCH, CRAWLER as sprites in stage coordinates
   (world x, `u` = stage line; screen y = 200 + lines - u), from `PLACEMENTS` (the bible waves placed on
   `s1.rs` geometry; `placements_sit_on_the_level` checks quays, pits, roofs, water with `s1::surface`).
@@ -297,7 +326,7 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   always starts on the complete new image.
 - **6502 size:** never u32/i32 math in our code (user: "massive code bloat"); a u32 `%` in `lines()` cost
   over 400 bytes of resident RAM. Check `llvm-size -A dist/talonhd.elf` and the link map after changes.
-- **Next:** S2's CAMPANILE and ASTROLABE and its clear, the per-level REU load (it must not overwrite the phase bank `$FF0000`). Then animation loops for the other stages. Memory ideas from the
+- **Next:** the per-level REU load (it must not overwrite the phase bank `$FF0000`). Then animation loops for the other stages. Memory ideas from the
   sibling repos still open: `opt-level "z"`, zero page `$90-$FF`, boot-only code in a retired section,
   borrow-and-restore overlays (impact), an IRQ static-frame audit (sueme64).
 - **Hardware quirk:** `c64u.py run` right after `config` can reset the machine before the PRG loads; run again.

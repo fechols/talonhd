@@ -233,7 +233,7 @@ pub fn demo_frames() -> Vec<SpriteImage> {
     // The PEREGRINE (hand-built): its banks, then its energy-wave frames.
     out.extend(peregrine_frames(&raster3d::MORNING));
     // The cards' lettering.
-    out.extend(crate::font::card_frames());
+    out.extend(crate::font::card_frames(0));
     assert_eq!(out.len(), demo::FRAMES as usize);
     out
 }
@@ -280,6 +280,10 @@ pub fn stage_frames(level: u8) -> Vec<SpriteImage> {
     }
     for (k, f) in peregrine_frames(&sun).into_iter().enumerate() {
         frames[demo::PEREGRINE_FRAME as usize + k] = f;
+    }
+    // Its cards: TERRACES' clear and promotion, then S3's card.
+    for (k, f) in crate::font::card_frames(level).into_iter().enumerate() {
+        frames[demo::CARD_FRAME as usize + k] = f;
     }
     let mut block: Vec<SpriteImage> = Vec::new();
     let roster: std::collections::HashMap<&str, Vec<SpriteImage>> = crate::hand_s2::roster().into_iter().collect();

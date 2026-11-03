@@ -172,11 +172,9 @@ pub static PLACEMENTS: [P2; PLACED] = [
     wasps(4400, HOOK, 0, 24, 10, true),
     st(MORTAR, 110, 4640),
     st(MORTAR, 230, 4700),
-    // (Screen 24: the ASTROLABE.) Until it exists, two strings close the stage.
-    wasps(4520, S_CURVE, 48, -12, 4, false),
-    wasps(4520, S_CURVE | MIRROR, 256, -12, 4, false),
+    // (Screen 24: the ASTROLABE, `crate::astrolabe`; the last two mortars are its arena's.)
 ];
-pub const PLACED: usize = 68;
+pub const PLACED: usize = 66;
 
 /// Hit points of S2's kinds, from `PIKE`.
 const HP: [u8; 7] = [1, 3, 6, 10, 8, 4, 1];
@@ -279,7 +277,14 @@ pub(crate) use s2_helpers;
 /// releasing: `waves` keeps itself due), then the ground units' and the air units' phases while any of each is out.
 #[inline(never)]
 #[cfg_attr(target_arch = "mos", unsafe(link_section = ".text.resident.s2_run"))]
-pub fn run(g: &mut Ground, w: &mut World, at: u16) {
+pub fn run(game: &mut crate::game::Game, at: u16) {
+    // The CAMPANILE's fight shares the waves' phase.
+    let c = &mut game.campanile;
+    if (at >= crate::campanile::ARRIVE && c.state != crate::campanile::GONE) || (at < crate::campanile::ARRIVE && c.state != crate::campanile::ABSENT) {
+        crate::paging::page(crate::paging::S2);
+        c.step(&mut game.world, &mut game.clear.pal, at);
+    }
+    let (g, w) = (&mut game.ground, &mut game.world);
     if at >= g.next_at || at < g.last {
         crate::paging::page(crate::paging::S2);
         waves(g, w, at);
@@ -487,6 +492,7 @@ mod tests {
         g
     }
 
+
     /// The level's own line under rail `rail` at `x` (exact, from `crate::s2`).
     fn exact(rail: usize, x: f64, lines: &[Vec<f64>]) -> f64 {
         match rail {
@@ -557,6 +563,8 @@ mod tests {
         let mut worst = 0.0f64;
         let mut seen = [false; 13];
         while g.world.scroll_lines() < 4200 {
+            // Without the CAMPANILE's fight (it holds the scroll until it falls).
+            g.campanile.state = crate::campanile::GONE;
             g.world.player.invuln = 2;
             g.world.player.invuln_kind = INV_ARM;
             g.step(0);
@@ -584,6 +592,7 @@ mod tests {
         let (mut kills, mut shots, mut wrecks, mut most, mut wasps) = (0u16, 0, 0, 0, 0);
         let mut t = 0u32;
         while g.world.scroll_lines() < 4900 {
+            g.campanile.state = crate::campanile::GONE;
             g.world.player.invuln = 2;
             g.world.player.invuln_kind = INV_ARM;
             let input = STICK_FIRE | if (t / 120) % 2 == 0 { LEFT } else { RIGHT };
@@ -645,13 +654,21 @@ mod tests {
         let mut g = s2_game();
         let mut mind = crate::ace::Mind::new();
         let mut t = 0;
-        while g.world.scroll_lines() < 4900 && t < 12_000 {
+        let (mut fight, mut boss) = (0, 0);
+        let mut silenced = false;
+        while g.clear.stage < 2 && t < 40_000 {
             let input = crate::ace::fly(&mut g, &mut mind);
             g.step(input);
+            fight += g.campanile.fighting() as u32;
+            boss += g.astro.fighting() as u32;
+            silenced |= g.campanile.state == crate::campanile::GONE && g.world.scroll_lines() > 3000;
             t += 1;
         }
-        println!("ACE in S2: {} deaths, {} kills, score {} by line {}", g.world.deaths, g.world.kills, g.world.score, g.world.scroll_lines());
-        assert!(g.world.deaths <= 2, "{} deaths", g.world.deaths);
+        println!("ACE fought the CAMPANILE for {fight} ticks, the ASTROLABE for {boss}");
+        assert!(silenced, "ACE silenced the CAMPANILE");
+        println!("ACE in S2: {} deaths, {} kills, score {} in {t} ticks", g.world.deaths, g.world.kills, g.world.score);
+        assert_eq!(g.clear.stage, 2, "ACE closed the observatory: stage 3");
+        assert!(g.world.deaths <= 3, "{} deaths", g.world.deaths);
         assert!(g.world.kills > 60);
     }
 }
