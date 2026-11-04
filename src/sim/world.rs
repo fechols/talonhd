@@ -43,6 +43,8 @@ pub struct Player {
     pub invuln_kind: u8,
     /// ARM was held on the previous tick (ARM is edge-triggered).
     pub arm_held: bool,
+    /// Sideways velocity, Q8 px/tick (TALON HD: an airframe with a slide eases into it, `ship`).
+    pub vx: i16,
 }
 
 /// A TWIN pair: the two bolts fired together at x -4 and +4, drawn as one 1x1 sprite (`render::game`).
@@ -160,6 +162,16 @@ pub struct World {
     pub pickups: u16,
     pub deaths: u16,
     pub arms: u16,
+    /// TALON HD: the airframe flown and its handling. Written only by `ship::fly` (`Game::step` flies
+    /// again whenever `ship` is not the stage's airframe); all zero is the TALON, so `new` is consistent.
+    /// Plain fields, copied once: per-tick table lookups cost the 6502 1.5 KB.
+    pub ship: u8,
+    pub speed_bias: i16,
+    pub diagonal_bias: i16,
+    pub slide: u8,
+    pub hitbox_extra: i16,
+    pub bolt_speed_extra: i16,
+    pub spread: i16,
 }
 
 /// High score shown before any game beats it (`07-ui-text.md` hud.top: `HI 0100000`).
@@ -177,7 +189,7 @@ impl World {
             scroll: 0,
             state: PLAY,
             timer: 0,
-            player: Player { x: START_X, y: START_Y, fire_timer: 0, invuln: 0, invuln_kind: INV_NONE, arm_held: false },
+            player: Player { x: START_X, y: START_Y, fire_timer: 0, invuln: 0, invuln_kind: INV_NONE, arm_held: false, vx: 0 },
             pairs: [Pair { alive: 0, x: 0, y: 0 }; PAIRS],
             wasps: [Wasp { alive: false, leader: false, curve: 0, seg: 0, seg_t: 0, angle: 0, x: 0, y: 0 }; WASPS],
             bursts: [Burst { t: 0, x: 0, y: 0 }; BURSTS],
@@ -198,6 +210,13 @@ impl World {
             pickups: 0,
             deaths: 0,
             arms: 0,
+            ship: 0,
+            speed_bias: 0,
+            diagonal_bias: 0,
+            slide: 0,
+            hitbox_extra: 0,
+            bolt_speed_extra: 0,
+            spread: 0,
         }
     }
 

@@ -21,7 +21,7 @@ WINDOW = (0x9000, 0xA000)
 # Phase entry points (mangled-name fragments), each called only after paging its phase in.
 ENTRIES = ('7Midboss4step', '6Ground4step', '5audio7service', '5audio5prime', '5audio4tune3arm',
            '5audio4tune7started', '5audio4tune9calibrate', '5audio4tune4load', '4game4Game5reset',
-           '14install_phases', '10boot_image', '8boot_irq', '10load_level', '4boss4Boss4step', '6replay9autopilot', '3ace3see', '3ace5motor', '3ace5think', '5clear5Clear4step', '5clear5Clear7sprites', '5clear5Clear7restart', '6stage25waves', '9Campanile4step', '9Campanile7sprites', '9Astrolabe4step', '9Astrolabe7sprites', '4gnd24step', '4air24step', '4game4Game8reset_at', '6render8hud_init', '6render10read_image',
+           '14install_phases', '10boot_image', '8boot_irq', '10load_level', '4boss4Boss4step', '6replay9autopilot', '3ace3see', '3ace5motor', '3ace5think', '5clear5Clear4step', '5clear5Clear7sprites', '5clear5Clear7restart', '4ship3fly', '6stage25waves', '9Campanile4step', '9Campanile7sprites', '9Astrolabe4step', '9Astrolabe7sprites', '4gnd24step', '4air24step', '4game4Game8reset_at', '6render8hud_init', '6render10read_image',
            '6render12verify_image', '6render16invalidate_image', 'bench_all')
 
 

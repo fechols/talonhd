@@ -91,15 +91,18 @@ pub fn step(g: &mut Ground, w: &mut World, at: u16) {
     }
 }
 
-/// An air unit within (`hw`, `hh`) of the ship destroys it as a WASP would: one is put on the ship for
+/// An air unit within (`hw` + 1, 8) of the ship (the TALON's reach; `hw` is one less: a byte of S2AIR) destroys it as a WASP would: one is put on the ship for
 /// the sim's own collision next tick (the unit bursts). Returns whether it hit.
 #[inline(never)]
-fn ram(u: &mut Unit, w: &mut World, hw: i16, hh: i16) -> bool {
+fn ram(u: &mut Unit, w: &mut World, hw: i16) -> bool {
     if w.state != PLAY || w.player.invuln != 0 {
         return false;
     }
     let (px, py) = ((w.player.x >> 8) as i16, (w.player.y >> 8) as i16);
-    if (u.px - px).abs() >= hw || (u.py - (py + HITBOX_DY)).abs() >= hh {
+    // The airframe's hitbox grows the reach (`sim::ship`: the CARACARA's 6 x 6). |d| < r as one unsigned
+    // compare: d + r - 1 in 0..2r - 1 (no abs: S2AIR is full).
+    let (rw, rh) = (hw + w.hitbox_extra, 7 + w.hitbox_extra);
+    if (u.px - px + rw) as u16 >= (rw + rw + 1) as u16 || (u.py - py - HITBOX_DY + rh) as u16 >= (rh + rh + 1) as u16 {
         return false;
     }
     launch(w, px, py, false);
@@ -137,7 +140,7 @@ fn pike(u: &mut Unit, w: &mut World, at: u16) {
     u.base = if left { -64i8 } else { 64 } as u8;
     u.n = (8 + 2 * dy) as i8 as u8;
     u.frame = S2_PIKE_FRAME as u8 + u.yaw;
-    if ram(u, w, 12, 8) {
+    if ram(u, w, 11) {
         return;
     }
     let (px, below) = ((w.player.x >> 8) as i16, (w.player.y >> 8) as i16 - u.py);
@@ -200,7 +203,7 @@ fn kestrel(u: &mut Unit, w: &mut World, pair: &mut u8) {
         u.state = FREE;
         return;
     }
-    if ram(u, w, 18, 8) || u.px < -8 || u.px > 312 {
+    if ram(u, w, 17) || u.px < -8 || u.px > 312 {
         return;
     }
     let n = hits(w, (u.px, u.py), 14);
@@ -260,5 +263,24 @@ fn shell(u: &mut Unit, w: &mut World) {
         }
         burst(w, u.px, u.py);
         u.state = FREE;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A KESTREL just out of the TALON's reach rams the wider CARACARA (`sim::ship`).
+    #[test]
+    fn rams_use_the_airframes_hitbox() {
+        for (ship, hit) in [(crate::sim::ship::TALON, false), (crate::sim::ship::CARACARA, true)] {
+            let mut w = World::new();
+            crate::sim::ship::fly(&mut w, ship);
+            w.state = PLAY;
+            w.player.invuln = 0;
+            let (px, py) = ((w.player.x >> 8) as i16, (w.player.y >> 8) as i16);
+            let mut u = Unit { state: LIVE, px: px + 18, py: py + HITBOX_DY, ..Unit::default() };
+            assert_eq!(ram(&mut u, &mut w, 17), hit, "ship {ship}");
+        }
     }
 }

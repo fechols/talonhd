@@ -701,6 +701,7 @@ mod tests {
         // Extends can add a full-stock bonus; none at these scores.
         assert_eq!(g.world.score, score + bonus);
         assert_eq!(g.world.scroll_lines(), 0, "stage 2 starts at its first line");
+        assert_eq!(g.world.player.vx, 0, "no slide carries into the stage");
         assert!(pals.len() >= 3, "the walk takes steps: {pals:?}");
         assert!(most_cards >= CLEAR_LINES as usize + 2);
         // Play goes on as the PEREGRINE.

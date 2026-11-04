@@ -107,6 +107,12 @@ impl Game {
     #[inline(never)]
     pub fn step(&mut self, input: u8) {
         self.ticks = self.ticks.wrapping_add(1);
+        // This stage's airframe flies as itself (`sim::ship`; a game over's reset makes it the TALON).
+        let ship = crate::sim::ship::of_stage(self.clear.stage);
+        if self.world.ship != ship {
+            crate::paging::page(crate::paging::ACE);
+            crate::sim::ship::fly(&mut self.world, ship);
+        }
         // The stage clear flies the ship itself: the world sees no stick.
         self.world.step(if self.clear.holds() { 0 } else { input });
         // The midboss and boss fight logic are paged phases (`crate::paging`), paged in only while active.
@@ -192,7 +198,9 @@ impl Game {
         } else {
             0
         };
-        if self.world.tick & 1 == 0 {
+        // A step every 2 ticks; the PEREGRINE (a lance, `sim::ship`) banks half as fast.
+        let mask = if self.world.ship == crate::sim::ship::PEREGRINE { 3 } else { 1 };
+        if self.world.tick as u8 & mask == 0 {
             if p.bank < target {
                 p.bank += 1;
             } else if p.bank > target {

@@ -30,6 +30,9 @@ impl World {
     /// The hitbox step (`docs/design.md` 5): main weapon not TWIN, FLANK, WINGS level; always 0 in M2.
     pub fn hitbox_step(&self) -> usize { if self.gauge.main != super::gauge::TWIN { 1 } else { 0 } }
 
+    /// TALON HD: the hitbox's half size, the step's plus the airframe's (`ship`).
+    pub fn hitbox_half(&self) -> i16 { HITBOX_HALF[self.hitbox_step()] + self.hitbox_extra }
+
     #[inline(never)]
     pub(crate) fn collide(&mut self) {
         let mut masks = [0u16; WASPS];
@@ -44,7 +47,7 @@ impl World {
         if self.state == PLAY {
             let px = (self.player.x >> 8) as i16;
             let py = (self.player.y >> 8) as i16 + HITBOX_DY;
-            let half = HITBOX_HALF[self.hitbox_step()];
+            let half = self.hitbox_half();
             let mask = band_mask(py - half, 2 * half);
             let mut k = 0;
             while k < WASPS {
@@ -118,7 +121,7 @@ impl World {
         if self.state == PLAY && self.player.invuln == 0 {
             let px = (self.player.x >> 8) as i16;
             let py = (self.player.y >> 8) as i16 + HITBOX_DY;
-            let half = HITBOX_HALF[self.hitbox_step()];
+            let half = self.hitbox_half();
             let mut k = 0;
             while k < GANNETS {
                 let g = self.gannets[k];

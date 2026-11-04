@@ -121,7 +121,7 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   row at a time and blends mixes. `render::draw_sprite`/`draw_cols`, `blit.S`, `test_blit.py` and
   `test_sprite.py` change together. Profiling builds: `-Features timing` (AUDIO_US, STEP_US in the status
   block), `bench` (unit costs); `examples/frame_census.rs` joins a hardware timing log with the model's work.
-- **Game** (`src/sim/`, vendored unchanged from TALON; `src/game.rs`, shared): one sim tick per frame. The
+- **Game** (`src/sim/`, vendored from TALON, changed only by `sim::ship`; `src/game.rs`, shared): one sim tick per frame. The
   304×176 playfield sits 8 px in and 8 lines down on the 320×192 screen; `game::scene` maps `World` to sprites
   (TALON with an eased bank, WASPs by heading, GANNETs by dive state, TWIN pairs, bullets, bursts, SPARKs),
   `game::hud_state` to the HUD. `Game::ticks` never resets (World::tick does at GAME OVER) and names the frame.
@@ -168,7 +168,7 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   tally is kept in hundreds, so a later stage's 70,000+ fits a u16, and banked an `add_score(100)` at a
   time: no 32-bit multiply); the palette walks to the next stage's colors (`fx.promotion_walk`, `clear::toward`: through the luminance
   groups' greys, void first, hot last, a step every 8 ticks) while the next airframe (the hand-built
-  PEREGRINE, `hand::peregrine`, TALON handling for now) climbs in; the next stage's card; then play from
+  PEREGRINE, `hand::peregrine`) climbs in; the next stage's card; then play from
   line 0 (`start_stage`), on the next level (past the last built one, the last again in the next stage's
   palette, `clear::PALETTES`).
   Card text is baked: one frame per line (`font.rs`, a condensed 3×7 font: 6×7 on screen; lines of at most 19
@@ -177,7 +177,7 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   (the image had no room for 72 more frames). `the_stage_clears_and_promotes`, `examples/clear_trace.rs`.
 - **Light / time of day** (`raster3d::Light`, `02-ladder.md` rung `light`): one light per stage for its sprites
   AND its level. Shading is normalised to the S1 morning sun (`MORNING`, the light every approved model used),
-  so a lower sun darkens flat ground. S2-S8 lights are drafts pending approval.
+  so a lower sun darkens flat ground. S2 and S3 lights are approved; S4-S8 are drafts pending approval.
 - **Animated levels** (user): a level is a loop of whole panorama copies (`s1::ANIM_FRAMES` 32 ×
   216 KB, `1 << ANIM_SHIFT` = 4 ticks each, a 2.1 s loop), each a full 3D render of `s1::level_at(t)` with
   its own shadow map, so moving things shade and cast shadows. The REU image starts with a frame table at
@@ -226,14 +226,14 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   plays TERRACES again as stage 3 in S3's colors (no S3 yet).
   A game over on a later stage sets S2's fights GONE (not stepped at their hold behind the GAME OVER;
   below their lines the new game resets them, `hot` its own).
-  Tests: `stage2::tests` (ACE flies S2 through both fights and the clear: 0 deaths, 13,049 ticks).
+  Tests: `stage2::tests` (ACE flies S2 through both fights and the clear as the PEREGRINE: 1 death, 13,529 ticks).
 - **CAMPANILE** (`src/campanile.rs`, S2 midboss; its step and render-time `sprites` live in the S2 phase, the
   sprites paged by `game::scene` only while it is shown): the tower is level geometry, the crown (8 spin
   samples, a clock-hand step every 6 ticks, every 2 winding up for a ring, reversed in phase 2) and the hub
   are sprites. The scroll holds at line 2368 (a constant store) until it falls. Phase 1: CHIME RING (8
   shards from the points) and SPOKE (a glowing point, then 5 shots). Phase 2: the hub opens and DOUBLE
   PEAL. The chime flips `Clear::pal`'s `hot` to `light` for 2 frames. HP: the bible's 56 + 24, tripled for
-  TWIN (ACE took 4 s at bible HP; now 12 s). 12,000 points, 3 SPARKs. `the_campanile_can_be_silenced`;
+  TWIN (ACE took 4 s at bible HP; now 12 s; the user approved the tripling, 2026-11-03). 12,000 points, 3 SPARKs. `the_campanile_can_be_silenced`;
   the S2 bake probes the fight.
 - **ASTROLABE** (`src/astrolabe.rs`, S2 boss, paged `ASTRO`: step and render-time `sprites`, 4,091 of
   4,096 B): the great dome is level geometry with its shutters shut; the fight draws the body (8 shutter
@@ -296,6 +296,18 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   ticks) so its later turrets come into reach. Turrets 12 HP each (BROADSIDE, WAKE MINES), then the bridge
   (36 HP, BRIDGE RING); sunk = 10,000 + 3 SPARKs; after 40 s the screen overtakes it. Hull 5 rolls, turret 16
   headings (hand-built; its deck is void/dark only so the light TALON reads over it). `the_destroyer_can_be_sunk`.
+- **Airframes** (`src/sim/ship.rs`; user: "Let's make each ship unique!"): each rung's ship flies its
+  bible `feel`. `ship::fly` (ACE phase, only when `of_stage(Clear::stage)` changes; `ship::BUILT` = airframes
+  with models, later stages fly the last) sets `World` fields that are all zero for the TALON, so a reset
+  World is the TALON and TALON's digest holds. TALON: the baseline. PEREGRINE: SPEED +64 Q8 (the bible's
+  448-768), sideways velocity easing a quarter of the way to the stick's a tick (`Player::vx`; rounded
+  toward zero and snapped, so it settles exactly both ways; a wall zeroes it; up/down at once), bolts 10
+  px/tick, the visual bank a step every 4 ticks (`Game::step`, from `World::ship`). CARACARA (when built):
+  SPEED -64, hitbox 6 x 6 (`hitbox_half`; S2's rams too), each shot two pairs 12 px apart or none
+  (`World::spread`, `room`; the hit code is unchanged). ACE plans with the ship's speeds, starts a sliding
+  ship's moves where its slide coasts it (`ace::coast`, 3 vx, from `think`: MOTOR is full) and leads
+  10 px bolts. 6502: plain fields, no per-tick table lookups (a `Ship` struct table cost 1.5 KB); the
+  sim's `fire` lives in `.hitext`, its `room` in `.iotext`. `sim::ship::tests`.
 - **Invincibility** (user): no blinking; the TALON's 9 banks have 8-step energy-wave frames
   (`models::shield_frames`: waves that follow the hull's silhouette outward, `light` fading to `dark` dots).
 - **Hit feedback** (user): the HUD never flashes. The border ramps black, dark grey, light grey, white, light
@@ -361,8 +373,9 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   are `#[inline(never)]` to stay in their regions; never pass `&mut` to main's `Image` (it moves to the
   soft stack, every field access indirect): return it by value.
 - **Next:** the per-level load on the C64U (`upload-levels`, the `start-s2` build, its load time; then ACE's
-  attract run through S1's clear into S2). Then S3 REDLINE (bible first) and animation loops for the other
-  stages. Memory ideas from the
+  attract run through S1's clear into S2). Then S3 REDLINE (`docs/story/hd/models/s3.md`, approved): per-level
+  phase slots first (14 of 15 phase ids are used; S3 needs ~4), then `src/s3.rs`, the hand models, the CARACARA
+  (`ship::BUILT` = 3), its waves and fights; and animation loops for the other stages. Memory ideas from the
   sibling repos still open: `opt-level "z"`, zero page `$90-$FF`, boot-only code in a retired section,
   borrow-and-restore overlays (impact), an IRQ static-frame audit (sueme64).
 - **Hardware quirk:** `c64u.py run` right after `config` can reset the machine before the PRG loads; run again.

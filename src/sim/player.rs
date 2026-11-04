@@ -61,6 +61,7 @@ impl World {
                         self.timer = LAUNCH_TICKS;
                         self.player.x = START_X;
                         self.player.y = LAUNCH_FROM_Y * PX;
+                        self.player.vx = 0;
                     }
                 }
             }
@@ -97,10 +98,18 @@ impl World {
     fn move_player(&mut self, input: u8) {
         let level = self.gauge.speed as usize;
         let diagonal = input & (LEFT | RIGHT) != 0 && input & (UP | DOWN) != 0;
-        let speed = if diagonal { SPEED_DIAGONAL_Q8[level] } else { SPEED_Q8[level] };
+        // TALON HD (`ship`): the airframe's speed, and with a slide, sideways a quarter of the way to the
+        // stick's velocity a tick (the TALON: all of it).
+        let speed = if diagonal { SPEED_DIAGONAL_Q8[level] as i16 + self.diagonal_bias } else { SPEED_Q8[level] as i16 + self.speed_bias };
+        let slide = self.slide;
         let p = &mut self.player;
-        if input & LEFT != 0 { p.x -= speed } else if input & RIGHT != 0 { p.x += speed }
-        if input & UP != 0 { p.y -= speed } else if input & DOWN != 0 { p.y += speed }
+        let want = if input & LEFT != 0 { -speed } else if input & RIGHT != 0 { speed } else { 0 };
+        // The quarter rounds toward zero and the last of it snaps, so the slide settles exactly both ways.
+        let d = want - p.vx;
+        let q = (if d < 0 { d + 3 } else { d }) >> 2;
+        p.vx = if slide == 0 || q == 0 { want } else { p.vx + q };
+        p.x += p.vx as i32;
+        if input & UP != 0 { p.y -= speed as i32 } else if input & DOWN != 0 { p.y += speed as i32 }
         // The boss ceiling eases toward its target; the anchor never goes above it.
         let target = if self.boss_ceiling { CEILING_TOP * PX } else { TOP * PX };
         if self.ceiling < target {
@@ -110,7 +119,14 @@ impl World {
             self.ceiling -= CEILING_EASE;
             if self.ceiling < target { self.ceiling = target; }
         }
-        if p.x < LEFT_X * PX { p.x = LEFT_X * PX } else if p.x > RIGHT_X * PX { p.x = RIGHT_X * PX }
+        // TALON HD: a wall stops the slide too (`ship`).
+        if p.x < LEFT_X * PX {
+            p.x = LEFT_X * PX;
+            p.vx = 0;
+        } else if p.x > RIGHT_X * PX {
+            p.x = RIGHT_X * PX;
+            p.vx = 0;
+        }
         if p.y < self.ceiling { p.y = self.ceiling } else if p.y > BOTTOM * PX { p.y = BOTTOM * PX }
     }
 
@@ -119,24 +135,52 @@ impl World {
     fn fire(&mut self, input: u8) {
         if self.player.fire_timer != 0 { self.player.fire_timer -= 1; }
         if input & FIRE == 0 || self.player.fire_timer != 0 { return; }
+        // TALON HD (`ship`): an airframe with a spread fires two pairs, `spread` either side of the nose,
+        // or none (a lopsided shot never: `room`).
+        if !self.room() { return; }
+        let x = (self.player.x >> 8) as i16;
+        let spread = self.spread;
+        let mut dx = -spread;
         let mut i = 0;
         while i < PAIRS {
             if self.pairs[i].alive == 0 {
-                self.pairs[i] = Pair { alive: 3, x: (self.player.x >> 8) as i16, y: (self.player.y >> 8) as i16 - 21 - BOLT_H + 4 };
+                self.pairs[i] = Pair { alive: 3, x: x + dx, y: (self.player.y >> 8) as i16 - 21 - BOLT_H + 4 };
                 self.player.fire_timer = TWIN_INTERVAL;
-                return;
+                if dx >= 0 { return; }
+                dx = spread;
             }
             i += 1;
         }
     }
 
+    /// TALON HD (`ship`): room for a shot: always for one pair (`fire` finds a slot or not), two free
+    /// slots for a spread shot. Pure and step-only, so on the C64 it lives in the RAM under the I/O chips
+    /// (`.hitext` has no room).
+    #[inline(never)]
+    #[cfg_attr(target_arch = "mos", unsafe(link_section = ".iotext.room"))]
+    fn room(&self) -> bool {
+        if self.spread == 0 {
+            return true;
+        }
+        let mut free = 0u8;
+        let mut i = 0;
+        while i < PAIRS {
+            if self.pairs[i].alive == 0 {
+                free += 1;
+            }
+            i += 1;
+        }
+        free >= 2
+    }
+
     #[inline(never)]
     fn move_shots(&mut self) {
+        let extra = self.bolt_speed_extra;
         let mut i = 0;
         while i < PAIRS {
             let pair = &mut self.pairs[i];
             if pair.alive != 0 {
-                pair.y -= TWIN_SPEED;
+                pair.y -= TWIN_SPEED + extra;
                 if pair.y + BOLT_H <= 0 { pair.alive = 0; }
             }
             i += 1;

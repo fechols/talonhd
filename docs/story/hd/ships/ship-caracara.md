@@ -5,7 +5,7 @@ name = "CARACARA"
 prototype = 11
 stage = "stage.s3"
 status = "approved"
-revision = 3
+revision = 4
 crystal = "none"
 identity = "a heavy twin-boom ground-attack craft in yellow and orange, a broad straight wing, a central armoured pod, two tail booms joined by a tailplane"
 silhouette = "short blunt central pod, broad straight wing, two parallel tail booms, a crossbar tailplane, two engine pods on the booms"
@@ -21,7 +21,7 @@ canvas = [52, 58]
 length_px = 56
 tris = 220
 orient = { roll = 9, roll_max_deg = 60 }
-ludo = { generator = "hero", rig = false, texture = "simple" }
+ludo = { generator = "hand", rig = false, texture = "none" }
 
 [[model.materials]]
 name = "hull"
@@ -72,3 +72,4 @@ The first wide ship. The open middle between the booms is a silhouette no enemy 
 - Decision: approved (whole HD layer approved at once, "Approve all, start Ludo")
 - rev 2 (2026-10-31): canvas height raised to length_px + 2 (rev 1 canvases were shorter than the ships; a number error, no design change)
 - rev 3 (2026-10-31): hull floors 1 -> 2 (shadow side stops at solid dark; art-direction review of the TALON pilot)
+- rev 4 (2026-11-03): hand-built (`src/hand.rs`) like the PEREGRINE, approved with `hd/models/s3.md`; its feel is flown (`src/sim/ship.rs`: two pairs a shot 12 px apart, 6 x 6 hitbox, SPEED -64)

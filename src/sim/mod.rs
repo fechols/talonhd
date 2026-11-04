@@ -1,7 +1,8 @@
 //! The deterministic `no_std` game simulation shared by the host player and the C64 Ultimate.
 //!
-//! Vendored unchanged from TALON (`../talon/src/sim`, commit 95179bb; `THIRD-PARTY.md`) so TALON's replay
-//! digest still holds. TALON HD maps the 304 x 176 playfield onto its screen in `crate::game`. The notes
+//! Vendored from TALON (`../talon/src/sim`, commit 95179bb; `THIRD-PARTY.md`), changed only by TALON HD's
+//! airframes (`ship`: `World::ship` picks each ship's speeds, slide, hitbox and bolts; row 0 is TALON's
+//! own), so TALON's replay digest still holds. TALON HD maps the 304 x 176 playfield onto its screen in `crate::game`. The notes
 //! below about REU code phases describe TALON's C64 runtime, not TALON HD's.
 //!
 //! Authored in NTSC ticks (one step per 60 Hz refresh) with Q8 fixed point, as `docs/design.md` 2 and
@@ -25,6 +26,7 @@ pub mod digest;
 pub mod gauge;
 pub mod player;
 pub mod replay;
+pub mod ship;
 pub mod track;
 pub mod world;
 

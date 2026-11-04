@@ -62,6 +62,7 @@ SECTIONS {
     .hitext : {
         *(.hitext .hitext.*)
         *(.text._ZN7talonhd3sim6actors*)
+        *(.text._ZN7talonhd3sim6player*4fire*)
         *(.text._ZN7talonhd4game9hud_state* .text._ZN7talonhd4game4view* .text._ZN7talonhd4game5shake* .text._ZN7talonhd4game7palette*)
         *(.text._ZN7talonhd4boss4Boss7sprites* .text._ZN7talonhd4boss4Boss7palette* .text._ZN7talonhd4boss9placement*)
     } >hiram AT>hiload

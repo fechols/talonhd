@@ -31,7 +31,7 @@ use crate::boss::NO_AIM;
 use crate::game::Game;
 use crate::ground;
 use crate::sim::actors::{B_BOMB, G_CLIMB, G_DIVE, G_PULLUP, G_TELEGRAPH};
-use crate::sim::collide::{GANNET_HALF_H, GANNET_HALF_W, HITBOX_DY, HITBOX_HALF, WASP_HALF_H, WASP_HALF_W};
+use crate::sim::collide::{GANNET_HALF_H, GANNET_HALF_W, HITBOX_DY, WASP_HALF_H, WASP_HALF_W};
 use crate::sim::common::sway;
 use crate::sim::gauge;
 use crate::sim::player::{BOTTOM, LEFT_X, RIGHT_X, SPEED_DIAGONAL_Q8, SPEED_Q8};
@@ -139,6 +139,8 @@ pub struct Mind {
     spark: u8,
     has_aim: u8,
     aim: Aim,
+    /// Where a sliding airframe's slide coasts it, Q6 (`coast`; `think` for the next `motor`).
+    coast: i16,
     clear: [i16; 9],
     ex: [i16; 9],
     ey: [i16; 9],
@@ -156,6 +158,7 @@ impl Mind {
             spark: NO_SPARK,
             has_aim: 0,
             aim: Aim { x: 0, y: 0, vx: 0 },
+            coast: 0,
             clear: [0; 9],
             ex: [0; 9],
             ey: [0; 9],
@@ -175,7 +178,8 @@ struct Threats {
     rh: [i16; MAX_THREATS],
 }
 
-/// The ship as the motor sees it: hitbox centre (Q6), straight and diagonal speed (Q6/tick), clamps.
+/// The ship as the motor sees it: hitbox centre (Q6; a sliding airframe's where its slide coasts it,
+/// `motor`), straight and diagonal speed (Q6/tick), clamps.
 struct Ship {
     x: i16,
     y: i16,
@@ -544,7 +548,7 @@ pub fn see(g: &mut Game, m: &mut Mind) -> u8 {
     g.ace.slice = 1;
     let px = (g.world.player.x >> 8) as i16;
     let py = (g.world.player.y >> 8) as i16;
-    let half = HITBOX_HALF[g.world.hitbox_step()] << 6;
+    let half = g.world.hitbox_half() << 6;
     m.diving = gather(g, px, py, half, &mut m.threats) as u8;
     let mut i = 0;
     while i < SPARKS {
@@ -564,7 +568,7 @@ pub fn see(g: &mut Game, m: &mut Mind) -> u8 {
 /// with the ground). S2's PIKEs and KESTRELs fly into the ship: along their velocity (Q4 in `base`, `n`).
 #[inline(never)]
 fn units(g: &Game, px: i16, py: i16, t: &mut Threats) {
-    let half = HITBOX_HALF[g.world.hitbox_step()] << 6;
+    let half = g.world.hitbox_half() << 6;
     let mut i = 0;
     while i < ground::UNITS {
         let u = &g.ground.units[i];
@@ -606,7 +610,7 @@ pub fn motor(g: &mut Game, m: &mut Mind) -> u8 {
     // the lookahead comes within `MARGIN` of anywhere the ship can reach (most bullets never do; the
     // lookahead's cost is per threat).
     let (sx, sy) = (px << 6, (py + HITBOX_DY) << 6);
-    let reach = (SPEED_Q8[w.gauge.speed as usize] >> 2) as i16 * HELD as i16 + MARGIN;
+    let reach = ((SPEED_Q8[w.gauge.speed as usize] as i16 + w.speed_bias) >> 2) * HELD as i16 + MARGIN;
     let t = &mut m.threats;
     let (mut k, mut kept) = (0, 0);
     while k < t.n {
@@ -632,10 +636,10 @@ pub fn motor(g: &mut Game, m: &mut Mind) -> u8 {
     let w = &g.world;
     let speed = w.gauge.speed as usize;
     let ship = Ship {
-        x: px << 6,
+        x: (px << 6) + m.coast,
         y: (py + HITBOX_DY) << 6,
-        v: (SPEED_Q8[speed] >> 2) as i16,
-        d: (SPEED_DIAGONAL_Q8[speed] >> 2) as i16,
+        v: (SPEED_Q8[speed] as i16 + w.speed_bias) >> 2,
+        d: (SPEED_DIAGONAL_Q8[speed] as i16 + w.diagonal_bias) >> 2,
         top: (w.ceiling >> 2) as i16,
     };
     let mut end = (0i16, 0i16);
@@ -661,6 +665,19 @@ pub fn motor(g: &mut Game, m: &mut Mind) -> u8 {
     g.ace.held()
 }
 
+/// A sliding airframe (`sim::ship`) carries its sideways velocity on whatever the stick does: every move
+/// starts where the slide coasts it (vx a tick, decaying by a quarter: 3 vx in all), Q6. Computed in
+/// `think` (the ACE phase has room; MOTOR has none), so `motor` sees it a few ticks late.
+#[inline(always)]
+fn coast(w: &crate::sim::world::World) -> i16 {
+    if w.slide != 0 {
+        let c = w.player.vx >> 2;
+        c + c + c
+    } else {
+        0
+    }
+}
+
 /// ACE phase: facts, goal and plan, then the stick from the lookahead.
 #[inline(never)]
 pub fn think(g: &mut Game, m: &mut Mind) -> u8 {
@@ -671,6 +688,7 @@ pub fn think(g: &mut Game, m: &mut Mind) -> u8 {
     let px = (g.world.player.x >> 8) as i16;
     let py = (g.world.player.y >> 8) as i16;
     let top = (g.world.ceiling >> 2) as i16;
+    m.coast = coast(&g.world);
 
     // Perception.
     let mut facts = 0u16;
@@ -697,9 +715,13 @@ pub fn think(g: &mut Game, m: &mut Mind) -> u8 {
     let mut lead = 0;
     if m.has_aim != 0 {
         facts |= TARGET;
-        // Bolts climb 8 px a tick: lead the target by its drift over the bolts' flight.
-        // (+2: the target was seen two ticks ago.)
-        let mut t = ((py - aim.y) >> 3) + 2;
+        // Bolts climb 8 px a tick (the PEREGRINE's 10: x 0.8125, no divide): lead the target by its
+        // drift over the bolts' flight. (+2: the target was seen two ticks ago.)
+        let mut t = (py - aim.y) >> 3;
+        if g.world.bolt_speed_extra != 0 {
+            t -= (t >> 3) + (t >> 4);
+        }
+        t += 2;
         let mut drift = 0i16;
         while t > 0 {
             drift += aim.vx;
@@ -836,6 +858,26 @@ pub fn think(g: &mut Game, m: &mut Mind) -> u8 {
 mod tests {
     use super::*;
     use crate::sim::replay::autopilot;
+
+    /// A sliding airframe coasts on after the stick is let go; the TALON stops at once.
+    #[test]
+    fn the_motor_knows_the_slide() {
+        // HOLD's end point for an airframe sliding right at `vx`.
+        let hold = |ship, vx| {
+            let mut g = Game::new();
+            crate::sim::ship::fly(&mut g.world, ship);
+            g.world.state = PLAY;
+            g.world.player.x = 150 << 8;
+            g.world.player.vx = vx;
+            let mut m = Mind::new();
+            m.coast = coast(&g.world);
+            motor(&mut g, &mut m);
+            m.ex[0] - (150 << 6)
+        };
+        assert_eq!(hold(crate::sim::ship::TALON, 448), 0, "the TALON stops at once");
+        assert_eq!(hold(crate::sim::ship::PEREGRINE, 0), 0);
+        assert_eq!(hold(crate::sim::ship::PEREGRINE, 448), 3 * 112, "the PEREGRINE coasts on");
+    }
 
     /// Fly a new game for `ticks`: (deaths, score, kills, the tick of each death, the KEELBREAKER sunk,
     /// the GANTRY QUEEN beaten).
