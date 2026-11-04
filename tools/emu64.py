@@ -531,8 +531,10 @@ def main():
     steps = 0
     prof, prof_from = None, 0
     want_painter = args.painter
-    helpers = {v: k for k, v in syms.items() if k in ('__mulhi3', '__udivhi3', '__divhi3', '__memset', '__mulsi3',
-                                                     '__udivsi3', '__divsi3', '__udivmodhi4', '__umodhi3', 'memcpy')}
+    # (asm/arith.S's `__wrap___X` replace libcrt's integer helpers; build.rs links them with --wrap.)
+    helpers = {v: k for k, v in syms.items() if k.removeprefix('__wrap_') in (
+        '__mulqi3', '__mulhi3', '__udivqi3', '__umodqi3', '__udivmodqi4', '__udivhi3', '__umodhi3', '__divhi3',
+        '__modhi3', '__memset', '__mulsi3', '__udivsi3', '__divsi3', '__udivmodhi4') or k == 'memcpy'}
     helper, calls = None, {}
     while cpu.flips < args.frames and steps < args.steps:
         if args.progress and steps % args.progress == 0:
@@ -555,7 +557,7 @@ def main():
             cpu.mem[0xCA80 + 31] = 1  # layout::status::CANVAS
             want_painter = False
         last.append(cpu.pc)
-        pc, c0 = cpu.pc, cpu.cycles
+        pc, c0, s0 = cpu.pc, cpu.cycles, cpu.s
         cpu.extra = 0
         try:
             cpu.tick()
@@ -569,7 +571,8 @@ def main():
             prof[key] = prof.get(key, 0) + spent
             # Runtime helpers (multiply, divide, memset) charged to their callers too.
             if helper is None and pc in helpers:
-                ret = cpu.mem[0x100 + ((cpu.s + 1) & 0xFF)] | cpu.mem[0x100 + ((cpu.s + 2) & 0xFF)] << 8
+                # The return address as the helper was entered (its first instruction may be a jsr).
+                ret = cpu.mem[0x100 + ((s0 + 1) & 0xFF)] | cpu.mem[0x100 + ((s0 + 2) & 0xFF)] << 8
                 helper = (helpers[pc], cpu.phase, ret, (ret + 1) & 0xFFFF)
             if helper is not None:
                 k = (helper[0], helper[1], helper[2])

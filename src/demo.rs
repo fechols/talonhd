@@ -197,9 +197,9 @@ pub const QUEEN_SPRITES: usize = 7;
 #[inline(never)]
 #[cfg_attr(target_arch = "mos", unsafe(link_section = ".hitext"))]
 pub fn isin(p: u8) -> i16 {
-    let x = (p & 127) as i32;
-    let v = (x * (128 - x) * 127 / 4096) as i16;
-    if p < 128 { v } else { -v }
+    // x(128 - x) * 127 / 4096 is the fine sine's x'(512 - x') * 127 / 65536 at x' = 4x (the i32 form
+    // linked libcrt's __mulsi3, 103 bytes of main RAM), and 4p's bit 9 is p's bit 7.
+    isin_fine((p as u16) << 2)
 }
 
 pub fn icos(p: u8) -> i16 {
@@ -211,8 +211,19 @@ pub fn icos(p: u8) -> i16 {
 #[inline(never)]
 #[cfg_attr(target_arch = "mos", unsafe(link_section = ".hitext"))]
 pub fn isin_fine(p: u16) -> i16 {
-    let x = (p & 511) as i32;
-    let v = (x * (512 - x) * 127 / 65536) as i16;
+    // x(512 - x) * 127 / 65536 without an i32 multiply: q = x(512 - x) = 256a + b fits a u16 but at the
+    // peak (x = 256, 65536: 127), and floor(127q / 65536) = floor((127a + f) / 256) with f = floor(127b /
+    // 256). Both are floors of n / 2 - n / 256 (n = 2m + r: m, less one when 128r < n), in bytes:
+    // 127a + f = 256(a >> 1) + 128(a & 1) + f - a, the last three in -255..=254.
+    let x = p & 511;
+    let v = if x == 256 {
+        127
+    } else {
+        let q = x * (512 - x);
+        let (a, b) = ((q >> 8) as u8, q as u8);
+        let f = (b >> 1) - (((b & 1) << 7) < b) as u8;
+        ((a >> 1) - ((((a & 1) << 7) + f) < a) as u8) as i16
+    };
     if p & 512 == 0 { v } else { -v }
 }
 
@@ -361,6 +372,17 @@ mod tests {
         assert_eq!(bank(127, 49), 48);
         assert_eq!(isin_fine(256), 127);
         assert_eq!(isin_fine(768), -127);
+        // The 16-bit sines equal the i32 forms they replaced at every input.
+        for p in 0..=255u8 {
+            let x = (p & 127) as i32;
+            let v = (x * (128 - x) * 127 / 4096) as i16;
+            assert_eq!(isin(p), if p < 128 { v } else { -v }, "isin({p})");
+        }
+        for p in 0..=u16::MAX {
+            let x = (p & 511) as i32;
+            let v = (x * (512 - x) * 127 / 65536) as i16;
+            assert_eq!(isin_fine(p), if p & 512 == 0 { v } else { -v }, "isin_fine({p})");
+        }
         // The sway tops out at ~1.17 px per frame: integer steps of at most 2.
         let x = |t: u16| isin_fine(t & 1023) as i32 * 150 / 127;
         assert!((0..2048u16).all(|t| (x(t + 1) - x(t)).abs() <= 2));

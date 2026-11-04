@@ -66,6 +66,8 @@ python tools/test_blit.py                # asm sprite kernel draw_cols vs refere
 python tools/test_sprite.py [n] [image]  # asm draw_sprite (cache, bands, chunks, clipping) vs reference, on a baked image
 python tools/c64u.py bench               # with a `-Features bench` build: the C64U's unit costs (I/O write, DMA, stores)
 python tools/test_hud_irq.py             # HUD raster IRQ vs the table contract, and its chain with the border painter
+python tools/test_arith.py               # asm/arith.S's integer libcalls vs Python (every u8 pair, every u16 divisor),
+                                         # the scratch registers each writes; --libcrt on an older ELF: libcrt's cycles
 python tools/check_phases.py             # REU paging audit: resident code enters the window only at phase entries; a
                                          # phase's calls/jumps land only on its own functions (phases share addresses)
 python tools/emu64.py --frames 160       # the real PRG in a 6502 + REU + $01 + raster IRQ + CIA1 timer A model
@@ -416,6 +418,12 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
 - **6502 size:** never u32/i32 math in our code (user: "massive code bloat"); a u32 `%` in `lines()` cost
   over 400 bytes of resident RAM, and one i32 divide in `demo::bank` pulled libcrt's `__divsi3` +
   `__udivsi3` (~580 bytes; now 16-bit, gone). Check `llvm-nm` for `si3` helpers after changes. Check `llvm-size -A dist/talonhd.elf` and the link map after changes.
+  `asm/arith.S` replaces libcrt's u8/u16 divides, remainders and multiplies (one u8 and one u16 divide
+  core, shift-and-add multiplies: 248 bytes of main RAM for libcrt's 967), linked with `-Wl,--wrap=__X`
+  (`build.rs`: libcrt keeps every divide in one archive member, so defining `__X` is a duplicate symbol); a
+  libcall it does not wrap (`__mulsi3`, `__divsi3`, ...) brings libcrt's back. `demo::isin`/`isin_fine` are
+  16-bit (exactly the i32 forms: `sine_and_bank`), so `__mulsi3` is gone too. Run `tools/test_arith.py` after
+  touching `arith.S`.
   LLVM inlines single-caller functions into `main` (resident RAM): `game::view` and `render::sort_by_z`
   are `#[inline(never)]` to stay in their regions; never pass `&mut` to main's `Image` (it moves to the
   soft stack, every field access indirect): return it by value.

@@ -471,3 +471,29 @@ a segment-list DMA and a job per column). Small sprites (bullets) should not tou
   frame, bands and 7,680 painted pixels as before.
 - `demo::bank` in 16 bits (equal to the i32 form over all inputs): libcrt's `__divsi3`/`__udivsi3` left the
   program, main RAM free 39 -> 644 bytes.
+
+## Integer libcalls in asm (2026-11-04)
+
+`target-c64/asm/arith.S` (from impact's `ram-helpers`, `THIRD-PARTY.md`) replaces libcrt's u8/u16 divides,
+remainders and multiplies through `-Wl,--wrap=__X` (`build.rs`): one 8-step u8 core for `__udivqi3`,
+`__umodqi3`, `__udivmodqi4`; one 16-step u16 core (8 steps when the divisor and the quotient fit a byte) for
+`__udivhi3`, `__umodhi3` and the signed `__divhi3`/`__modhi3`; shift-and-add `__mulhi3`, which `__mulqi3`
+enters. `demo::isin` is `isin_fine(4p)` and `isin_fine` 16-bit (both equal to the i32 forms at every input,
+`sine_and_bank`), so `__mulsi3` is gone too. libcrt's helpers were 1,070 bytes of main RAM (and its 15 bytes
+of `.zp`); arith.S is 248. Main RAM free, before -> after: default and `start-s2` 190 -> 1,012,
+`start-keel` 139 -> 961, `start-boss` 148 -> 970, `timing` 71 -> 893, `profile` 190 -> 1,012, `bench`
+162 -> 984; `.hitext` +32 in each (the sines).
+
+- `tools/test_arith.py`: every u8 pair (divide, remainder, divmod, multiply), every u16 divisor with edge
+  dividends, random and game-shaped pairs, signed edge and random pairs: all equal Python, each routine
+  writing only its declared registers, the stack balanced. Cycles (game-shaped, ours / libcrt's): u8 divide
+  213 / 244, u16 divide 659 / 780, u16 remainder 677 / 668, i16 divide 682 / 616, i16 remainder 685 / 528,
+  u16 multiply 263 / 289, u8 multiply 303 / 166 (the u16 loop).
+- Unchanged against master: `cargo test --release`, the bakes' self-checks and stats (both images differ
+  from master's only in the header's phase stamp and the phase bank), `check_phases`, `test_blit`,
+  `test_sprite`, `test_hud_irq`. emu64, master and this build: default 74 flips, `--painter` 92, `--frames
+  60`, and `start-keel`, `start-boss` (S2 image) and `start-s2` (`--level-dir`, the S2 load) at 90 flips:
+  bitmap, screen, colour RAM, bands and painted border byte-identical between the two (only the status
+  block's timing laps move), music 0 underruns; `compare` 0 mismatched bytes on the default, painter and
+  60-flip dumps. The profile (`--profile`, `start-boss`, 60 frames) is 39.27 ms a frame on both; the helpers
+  cost within ~0.01 ms a frame of libcrt's.
