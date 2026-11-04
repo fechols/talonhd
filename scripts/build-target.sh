@@ -14,6 +14,8 @@ for elf in "$native_target/mos-c64-none/release/deps"/talonhd_c64-*.elf; do
         cp "$elf" dist/talonhd.elf
     fi
 done
+# The llvm-mos assembler silently wraps an out-of-range branch (from typo, via sueme64/crush).
+python3 tools/branch-audit.py target-c64/asm/*.S
 # Paged phases (all but BOOT live outside the PRG): extract them for bake and stamp the PRG.
 python3 tools/phases.py dist/talonhd.elf dist/talonhd.prg dist/phases
 "$LLVM_MOS/bin/llvm-size" -A dist/talonhd.elf | grep -v '^\.debug' || true

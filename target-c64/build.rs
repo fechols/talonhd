@@ -4,7 +4,7 @@ fn main() {
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let compiler = env::var("MOS_CLANG").unwrap_or_else(|_| "mos-c64-clang".into());
-    let mut sources = vec!["startup", "reu", "blit", "hud", "digital", "mem"];
+    let mut sources = vec!["startup", "reu", "blit", "hud", "digital", "mem", "bands", "border"];
     // Unit-cost microbenchmarks (feature `bench`).
     if env::var_os("CARGO_FEATURE_BENCH").is_some() {
         sources.push("bench");

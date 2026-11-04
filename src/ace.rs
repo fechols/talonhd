@@ -130,16 +130,17 @@ pub const MIND_REU: u32 = 0xFE_7000;
 /// The `Mind`'s size in bytes (what the C64 parks).
 pub const MIND_BYTES: u16 = core::mem::size_of::<Mind>() as u16;
 
-/// What the phases hand on within a tick: `see` fills the threats, SPARK and target, `motor` each
-/// move's clearance, end point and stick bits. Plain integers only (on the C64 it is scratch RAM that
-/// `see` initialises).
+/// What the phases hand on within a tick: `see` fills the threats, SPARK, target and coast, `motor` each
+/// move's clearance, end point and stick bits. Plain integers only. On the C64 it is scratch RAM that
+/// `see` initialises: it is not fetched from the REU before `see`, so nothing may be carried from one
+/// decision's `think` to the next `motor` (`the_mind_needs_nothing_from_before_see`).
 pub struct Mind {
     threats: Threats,
     diving: u8,
     spark: u8,
     has_aim: u8,
     aim: Aim,
-    /// Where a sliding airframe's slide coasts it, Q6 (`coast`; `think` for the next `motor`).
+    /// Where a sliding airframe's slide coasts it, Q6 (`coast`; `see` for `motor`).
     coast: i16,
     clear: [i16; 9],
     ex: [i16; 9],
@@ -560,6 +561,7 @@ pub fn see(g: &mut Game, m: &mut Mind) -> u8 {
         i += 1;
     }
     m.has_aim = choose(g, px, py, &mut m.aim) as u8;
+    m.coast = coast(&g.world);
     g.ace.held()
 }
 
@@ -667,7 +669,7 @@ pub fn motor(g: &mut Game, m: &mut Mind) -> u8 {
 
 /// A sliding airframe (`sim::ship`) carries its sideways velocity on whatever the stick does: every move
 /// starts where the slide coasts it (vx a tick, decaying by a quarter: 3 vx in all), Q6. Computed in
-/// `think` (the ACE phase has room; MOTOR has none), so `motor` sees it a few ticks late.
+/// `see` (MOTOR has no room), so `motor` sees it a tick late.
 #[inline(always)]
 fn coast(w: &crate::sim::world::World) -> i16 {
     if w.slide != 0 {
@@ -688,7 +690,6 @@ pub fn think(g: &mut Game, m: &mut Mind) -> u8 {
     let px = (g.world.player.x >> 8) as i16;
     let py = (g.world.player.y >> 8) as i16;
     let top = (g.world.ceiling >> 2) as i16;
-    m.coast = coast(&g.world);
 
     // Perception.
     let mut facts = 0u16;
@@ -870,13 +871,42 @@ mod tests {
             g.world.player.x = 150 << 8;
             g.world.player.vx = vx;
             let mut m = Mind::new();
-            m.coast = coast(&g.world);
+            see(&mut g, &mut m);
             motor(&mut g, &mut m);
             m.ex[0] - (150 << 6)
         };
         assert_eq!(hold(crate::sim::ship::TALON, 448), 0, "the TALON stops at once");
         assert_eq!(hold(crate::sim::ship::PEREGRINE, 0), 0);
         assert_eq!(hold(crate::sim::ship::PEREGRINE, 448), 3 * 112, "the PEREGRINE coasts on");
+    }
+
+    /// The C64 does not fetch the parked `Mind` before `see` (its RAM is the renderer's scratch by then):
+    /// garbage there before every `see` must not change a single stick, as the TALON and the PEREGRINE.
+    #[test]
+    fn the_mind_needs_nothing_from_before_see() {
+        for stage in [0u8, 1] {
+            let run = |poison: bool| -> Vec<u8> {
+                let mut g = Game::new();
+                g.clear.stage = stage;
+                let mut m = Mind::new();
+                let mut sticks = vec![];
+                for t in 0..3_000u32 {
+                    if poison && g.ace.slice == 0 {
+                        // SAFETY: the Mind is plain integers; any byte pattern is a valid value.
+                        unsafe {
+                            core::ptr::write_bytes(&mut m as *mut Mind as *mut u8, (0xA5 ^ t) as u8, core::mem::size_of::<Mind>())
+                        };
+                    }
+                    let input = fly(&mut g, &mut m);
+                    sticks.push(input);
+                    g.step(input);
+                }
+                sticks
+            };
+            let (clean, dirty) = (run(false), run(true));
+            let first = (0..clean.len()).find(|&t| clean[t] != dirty[t]);
+            assert_eq!(first, None, "stage {stage}: the stick differs from tick {first:?}");
+        }
     }
 
     /// Fly a new game for `ticks`: (deaths, score, kills, the tick of each death, the KEELBREAKER sunk,

@@ -25,7 +25,15 @@ talonhd_boot:
     sta $ffff
     lda #$35
     sta $01
-    ; Copy the relocated code (.hitext, .lowtext, .uptext, .iotext) from its load image ($4C00..., inside
+    ; The border painter's block ($CAE0, layout::PAINTER) before any REU DMA: RAM keeps whatever it held
+    ; across a reset, and a stale P_GATE with bit 7 set would hold every DMA (asm/reu.S) for good.
+    lda #0
+    ldx #31
+talonhd_clear_painter:
+    sta $cae0,x
+    dex
+    bpl talonhd_clear_painter
+    ; Copy the relocated code (.hitext, .lowtext, .uptext, .iotext, .vtext, .ptext, .p2text) from its load image ($4C00..., inside
     ; frame buffer 0's bank) to where it runs. Whole pages: every destination region is page-aligned
     ; and a whole number of pages long, so the tail of a last page is harmless padding.
     lda #<__hitext_load_start
@@ -108,6 +116,64 @@ talonhd_iotext_dst:
 3:
     lda #$35
     sta $01
+    lda #<__vtext_load_start
+    sta talonhd_vtext_src+1
+    lda #>__vtext_load_start
+    sta talonhd_vtext_src+2
+    ldx #<__vtext_pages
+    beq 3f
+    ldy #0
+1:
+talonhd_vtext_src:
+    lda $ffff,y
+talonhd_vtext_dst:
+    sta __vtext_start,y
+    iny
+    bne 1b
+    inc talonhd_vtext_src+2
+    inc talonhd_vtext_dst+2
+    dex
+    bne 1b
+3:
+    lda #<__ptext_load_start
+    sta talonhd_ptext_src+1
+    lda #>__ptext_load_start
+    sta talonhd_ptext_src+2
+    ldx #<__ptext_pages
+    beq 3f
+    ldy #0
+1:
+talonhd_ptext_src:
+    lda $ffff,y
+talonhd_ptext_dst:
+    sta __ptext_start,y
+    iny
+    bne 1b
+    inc talonhd_ptext_src+2
+    inc talonhd_ptext_dst+2
+    dex
+    bne 1b
+3:
+    lda #<__p2text_load_start
+    sta talonhd_p2text_src+1
+    lda #>__p2text_load_start
+    sta talonhd_p2text_src+2
+    ldx #<__p2text_pages
+    beq 3f
+    ldy #0
+1:
+talonhd_p2text_src:
+    lda $ffff,y
+talonhd_p2text_dst:
+    sta __p2text_start,y
+    iny
+    bne 1b
+    inc talonhd_p2text_src+2
+    inc talonhd_p2text_dst+2
+    dex
+    bne 1b
+3:
+    nop                 ; (the falls-through point of the copies; a label at a section's end confuses the branch audit)
 
 .section .text.talonhd_ignore_interrupt,"ax",@progbits
 talonhd_ignore_interrupt:

@@ -35,14 +35,87 @@ pub const BUFFERS: [Buffer; 2] = [
 
 /// `$D018`: screen at bank+$0C00, bitmap at bank+$2000.
 pub const D018: u8 = 0x38;
-/// `$D016` without XSCROLL: multicolor, 38 columns. The narrower window hides the bitmap's edges, so the
-/// camera shake can move XSCROLL either way around its rest position.
-pub const D016: u8 = 0x10;
-/// XSCROLL at rest: the shake moves it -4..=+3 hires px.
-pub const XSCROLL_REST: u8 = 4;
-/// Lines of the bitmap the VIC shows in 24-row mode: bitmap lines
-/// `fine..fine + VISIBLE` (see [`crate::render::Scroll`]).
+/// `$D016`: multicolor, 40 columns, XSCROLL 0: the window is the bitmap's full 320 dots, as wide as the
+/// painted bands (user: no squeezed sides; the camera shake is vertical only).
+pub const D016: u8 = 0x18;
+/// The border painter's canvas (`asm/border.S`, from typo): the 24-row window (192 lines, raster 55..246,
+/// hardware YSCROLL `7 - fine`) and 24 lines painted through `$D020` above it (raster 31..54, block T) and
+/// below it (raster 247..7, block B), 240 in all. Screen line `y` (the game's coordinates, raster 55) is
+/// canvas line `y + BAND_LINES` and bitmap line `y + fine`.
+pub const BAND_LINES: i16 = 24;
 pub const VISIBLE: i16 = 192;
+pub const CANVAS: i16 = VISIBLE + 2 * BAND_LINES;
+/// Cell rows composed per band: -3..=-1 above the bitmap and 25..=27 below it, so the painted lines
+/// (bitmap lines `fine - 24 ..` and `fine + 192 ..`) always exist, with the bitmap's own hidden lines (row
+/// 0's top, row 24's bottom).
+pub const BAND_ROWS: u16 = 3;
+pub const BAND_BYTES: u16 = BAND_ROWS * ROW_STRIDE;
+/// Where the bands are composed while a frame is drawn: the top band's rows, then the bottom band's
+/// (2 x `BAND_BYTES`), in the paging window's tail (the BANDS phase's data; `$9F80` is the end).
+pub const BANDS: u16 = 0x9800;
+/// REU: each buffer's painted lines (`render::stash_bands`), which the painter streams back while that
+/// buffer is shown: above the phase slots (`paging::REU_PHASES`, 15 x 4 KiB). Line-major, the painter's
+/// order: block T's 24 lines, then block B's, 40 bytes a line.
+pub const BAND_REU: u32 = 0xFF_F000;
+pub const BAND_SET: u32 = 0x800;
+/// Bytes of one painted line, of a block, and of a band set.
+pub const BAND_LINE: u16 = 40;
+pub const BLOCK_BYTES: u16 = BAND_LINES as u16 * BAND_LINE;
+pub const BAND_SET_BYTES: u16 = 2 * BLOCK_BYTES;
+/// Where `render::stash_bands` lays a block's 4 source rows out line-major (`SEG_BUF`, free once the
+/// sprites are drawn): 32 lines of 40 bytes, the block's 24 from line `fine`.
+pub const BAND_LINES_BUF: u16 = SEG_BUF;
+const _: () = assert!(BAND_SET_BYTES as u32 <= BAND_SET && BANDS + 2 * BAND_BYTES <= 0xA000 && 32 * BAND_LINE <= SEG_BUF_LEN);
+/// Buffer `buf`'s band set in the REU.
+pub const fn band_set(buf: Buffer) -> u32 {
+    BAND_REU + if buf.bitmap == BUFFERS[0].bitmap { 0 } else { BAND_SET }
+}
+/// The `$D011` block B's flip writes (this frame's YSCROLL; `asm/border.S` `P_D011`).
+pub const PAINTER_D011: u16 = 0xCB5F;
+/// `asm/reu.S` `reu_transfer`: non-zero = the next piece loads every REU register (the painter's refill
+/// sets it: it loads them itself); and the piece's length. Free bytes of the transpose job (`$CAD8`).
+pub const REU_DIRTY: u16 = 0xCADE;
+/// `asm/hud.S` `irq_clock_in`: CIA 2 timer A at the IRQ's entry (2 bytes).
+pub const IRQ_T0: u16 = 0xCADA;
+/// The border painter's block (`asm/border.S` `P_*`, `asm/hud.S`): parameters, state, diagnostics.
+pub const PAINTER: u16 = 0xCAE0;
+pub mod painter {
+    /// u8: non-zero once the painter runs (`asm/hud.S` chains its blocks).
+    pub const ON: u16 = 0;
+    /// u8: bit 7 while no REU DMA may start (`asm/reu.S`, `asm/blit.S`).
+    pub const GATE: u16 = 1;
+    pub const NEXT: u16 = 2;
+    /// u8: `$80 | buffer`: block B shows that buffer (bank, `$D016`, band set); 0 once done.
+    pub const FLIP: u16 = 3;
+    pub const D016: u16 = 4;
+    /// u8: the shown buffer (whose band set block T and B are refilled from).
+    pub const FRONT: u16 = 5;
+    /// Calibration, poke-able live (typo's names): spin target, delay loop, 1-cycle trim, the turbo's
+    /// `$D031`, timer A's phase offset and sync line; then the measured line offset.
+    pub const TA: u16 = 6;
+    pub const DL: u16 = 7;
+    pub const DF: u16 = 8;
+    pub const TURBO: u16 = 9;
+    pub const AOFS: u16 = 10;
+    pub const SYNC: u16 = 11;
+    pub const DELTA: u16 = 12;
+    /// The badline row's delay loop and trim (`DL + 6`, `DF + 6`); `LATEBLK` u16: blocks skipped (late).
+    pub const DLB: u16 = 13;
+    pub const DFB: u16 = 14;
+    pub const LATEBLK: u16 = 15;
+    /// u8: the border colour the painter puts in the corners (`hud_update` keeps it with `$D020`).
+    pub const BORDER: u16 = 17;
+    /// 7 × u8: the foreground's REU job (`asm/reu.S` `reu_transfer`): C64 address, REU address, length.
+    pub const DMA_JOB: u16 = 21;
+    /// 4 × u8: the colours of codes 00..11 for the decode tables (`border_tables`).
+    pub const COL: u16 = 28;
+    /// The staging (`asm/border.S` `STAGE`): one block's 24 lines, 6 a page (40 bytes each), 4 pages.
+    pub const STAGE: u16 = 0x5800;
+    /// Defaults for TA, DL, DF, TURBO, AOFS, SYNC (`asm/border.S` `defaults`): typo's TA/AOFS/SYNC; DL/DF
+    /// calibrated on the C64U (firmware 1.1.0, FPGA 122, core 1.49; 2026-11-04): the bands on the window's
+    /// x 32..351, every pixel 2 dots and in phase with the window's. The badline row's: DLB 71, DFB 4.
+    pub const DEFAULTS: [u8; 6] = [37, 73, 2, 0x8F, 26, 100];
+}
 
 /// Per-column segment list for the column being drawn (≤ 512 × 4 bytes).
 pub const SEG_BUF: u16 = 0xC000;
@@ -67,6 +140,8 @@ pub const SPRITE_POINTERS: [u16; 2] = [0x4FF8, 0x8FF8];
 /// The multiplexer's table, read by the raster IRQ (`asm/hud.S`); see
 /// [`crate::hud::Table`] for the layout.
 pub const HUD_TABLE: u16 = 0xCB00;
+/// Per bank, the REU variant each live HUD slot holds (`hud::LIVE` bytes each; `render::hud_update`).
+pub const HUD_SHOWN: u16 = HUD_TABLE + crate::hud::table::LEN + 1;
 
 /// Status block the host verifier reads from a paused machine.
 pub const STATUS: u16 = 0xCA80;
@@ -120,7 +195,8 @@ pub mod status {
     pub const HOLD: u16 = 8;
     /// u16: microseconds of RENDER_US spent restoring the background.
     pub const BACKGROUND_US: u16 = 10;
-    /// u16 (feature `timing`): microseconds of the last frame's music service (AUDIO paging + decode).
+    /// u16 (feature `timing`): microseconds of the last frame's music service (decode and stash; the page
+    /// is `AUDIO_PAGE_US`).
     pub const AUDIO_US: u16 = 12;
     /// u16 (feature `timing`): microseconds of the last game step (input, the attract pilot, the sim, the
     /// boss/midboss/ground steps, all their paging).
@@ -128,6 +204,19 @@ pub mod status {
     /// 3 × u16 (feature `profile`): sprite time in setup / column overhead /
     /// column kernel, in µs.
     pub const PROFILE_US: u16 = 16;
+    /// u16 (feature `timing`): microseconds the main loop waited for the painter's flip, IRQs left out (the
+    /// frame's slack).
+    pub const WAIT_US: u16 = 22;
+    /// u16, free-running: microseconds spent in raster IRQs (the HUD rows and the painted blocks;
+    /// `asm/hud.S` `irq_clock_*`). The timing laps leave it out.
+    pub const IRQ_US: u16 = 24;
+    /// u16 (feature `timing`): microseconds of the step's ACE slice (Mind DMAs, its phase page, the slice).
+    pub const ACE_US: u16 = 26;
+    /// u16 (feature `timing`): microseconds of `render::hud_update`.
+    pub const HUD_US: u16 = 29;
+    /// u8, bit 0: the border painter wanted (the 160×240 canvas; off = plain borders, 60 fps): 0 at boot,
+    /// F1 flips it, tools poke it (`c64u.py canvas on|off`, emu64 `--painter`).
+    pub const CANVAS: u16 = 31;
     /// Nonzero once a player has touched the stick (the frame is no longer the attract-mode replay).
     pub const HUMAN: u16 = 28;
 }

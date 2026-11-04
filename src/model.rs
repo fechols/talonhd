@@ -232,24 +232,59 @@ impl Machine {
         self.regs[(r - 0xDF00) as usize]
     }
 
-    /// The visible lines of `buf` (24-row mode, `fine` = scroll fine) as RGB.
-    pub fn visible(&self, buf: Buffer, d021: u8, fine: u8) -> Vec<[u8; 3]> {
-        let all = self.decode(buf, d021);
-        let top = fine as usize * 160;
-        all[top..top + layout::VISIBLE as usize * 160].to_vec()
+    /// The codes the border painter shows while `buf` is on screen: its band set in the REU
+    /// (`render::stash_bands`), 160×20 above the window (bitmap lines -20..0) and 160×20 below (200..220).
+    pub fn band_codes(&self, buf: Buffer) -> (Vec<u8>, Vec<u8>) {
+        // Line-major: 40 bytes a line, the top band's 20 lines, then the bottom band's.
+        let set = layout::band_set(buf) as usize;
+        let n = layout::BAND_LINES as usize;
+        let lines = |base: usize| -> Vec<u8> {
+            let mut out = vec![0u8; n * 160];
+            for y in 0..n {
+                for x in 0..160usize {
+                    let byte = self.reu[base + y * layout::BAND_LINE as usize + x / 4];
+                    out[y * 160 + x] = (byte >> (6 - 2 * (x & 3))) & 3;
+                }
+            }
+            out
+        };
+        (lines(set), lines(set + n * layout::BAND_LINE as usize))
     }
 
-    /// The visible screen at full hires resolution (320×192) with the HUD's
-    /// multiplexed sprites drawn from the table and blocks in RAM, as the
-    /// raster IRQ shows them.
-    pub fn visible_with_hud(&self, buf: Buffer, d021: u8, fine: u8) -> Vec<[u8; 3]> {
+    /// The whole canvas while `buf` is shown (160×240, RGB): the painted bands (codes through the global
+    /// palette, as the painter's tables map them) around the window.
+    pub fn canvas(&self, buf: Buffer, d021: u8, fine: u8) -> Vec<[u8; 3]> {
+        let rgb = |code: u8| -> [u8; 3] {
+            let scr = self.ram[buf.screen as usize];
+            let color = match code {
+                0 => d021,
+                1 => scr >> 4,
+                2 => scr & 15,
+                _ => self.color_ram[0] & 15,
+            };
+            PALETTE[color as usize & 15]
+        };
+        let (top, bottom) = self.band_codes(buf);
+        let mut out: Vec<[u8; 3]> = top.iter().map(|&c| rgb(c)).collect();
+        // The window: bitmap lines fine..fine + 192 (24-row mode, YSCROLL 7 - fine).
+        let top = fine as usize * 160;
+        out.extend(&self.decode(buf, d021)[top..top + layout::VISIBLE as usize * 160]);
+        out.extend(bottom.iter().map(|&c| rgb(c)));
+        out
+    }
+
+    /// The canvas at full hires resolution (320×240) with the HUD's multiplexed sprites drawn from the
+    /// table and blocks in RAM, as the raster IRQ shows them (rows on screen lines 0..192, canvas lines
+    /// 24..216).
+    pub fn canvas_with_hud(&self, buf: Buffer, d021: u8, fine: u8) -> Vec<[u8; 3]> {
         use crate::hud;
-        let mc = self.visible(buf, d021, fine);
+        let mc = self.canvas(buf, d021, fine);
         let mut out: Vec<[u8; 3]> = mc.iter().flat_map(|&p| [p, p]).collect();
         let bank = if buf == layout::BUFFERS[0] { 0 } else { 1 };
         let table = layout::HUD_TABLE as usize;
+        let screen0 = layout::BAND_LINES as i32;
         for r in 0..hud::ROWS {
-            let top = (r * hud::ROW_PITCH as usize) as i32; // screen line of the row
+            let top = screen0 + (r * hud::ROW_PITCH as usize) as i32; // canvas line of the row
             for (c, &x0) in hud::X.iter().enumerate() {
                 let ptr = self.ram[table + hud::table::PTRS as usize + r * 8 + c] as usize;
                 let ptr = if bank == 0 { ptr | layout::HUD_BANK1_POINTER as usize } else { ptr };
@@ -260,7 +295,7 @@ impl Machine {
                 for y in 0..21 {
                     for x in 0..24 {
                         let (sx, sy) = (x0 as i32 - 24 + x, top + y);
-                        if hud::get(&blk, x, y) && (0..320).contains(&sx) && (0..layout::VISIBLE as i32).contains(&sy) {
+                        if hud::get(&blk, x, y) && (0..320).contains(&sx) && (0..layout::CANVAS as i32).contains(&sy) {
                             out[sy as usize * 320 + sx as usize] = color;
                         }
                     }
@@ -417,6 +452,7 @@ pub fn render_game(m: &mut Machine, img: &crate::render::Image, g: &crate::game:
     render::render_frame(m, img, buf, scroll, &mut sprites[..n]);
     render::present(m, buf, scroll);
     render::hud_init(m, img);
-    render::hud_update(m, &game::hud_state(g));
+    let bank = if buf == layout::BUFFERS[0] { 0 } else { 1 };
+    render::hud_update(m, &game::hud_state(g), img.hud, bank);
     scroll
 }

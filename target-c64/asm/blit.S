@@ -288,8 +288,10 @@ copy_entry:
 ; draw_sprite_asm — one whole sprite. Same contract as the Rust reference `talonhd::render::draw_sprite`
 ; (the host model runs that; tools/test_blit.py runs both on the baked image).
 ;
-; Inputs (SP block, little-endian): frame (u16, < image frames), x, y (i16; y already includes the fine
-; scroll), the back buffer's bitmap address, the frame directory's REU address (u24).
+; Inputs (SP block, little-endian): frame (u16, < image frames), x, y (i16, a line of the target), the
+; target's address (the back buffer's bitmap, or a band's rows: cell rows 320 bytes apart), the frame
+; directory's REU address (u24), and (SP_HEIGHT) the target's lines (200, or a band's 24). Leaves the
+; frame's height in SP_H (the caller decides from it which other targets the sprite reaches).
 ;
 ; Small one-band blocks come from the RAM cache (layout::SPRITE_CACHE: 8 slots of $82 bytes, picked by
 ; (frame * 4 + x & 3) & 7; tag frame + 1, x phase, byte columns, height, then the block). Otherwise: the
@@ -327,6 +329,9 @@ SP_T      = $CACD
 RF_REU    = $CAD0
 RF_C64    = $CAD3
 RF_LEN    = $CAD5
+P_GATE    = $CAE1
+REU_DIRTY = $CADE     ; layout::REU_DIRTY (asm/reu.S)
+SP_HEIGHT = $CAD7
 
 RECORD    = $CA20
 CHUNK     = $C000
@@ -586,9 +591,9 @@ clip:
     lda #0
     sbc SP_Y+1
     sta SP_TOP+1
-7:  ; bot = min(h, 200 - y) (signed)
+7:  ; bot = min(h, height - y) (signed)
     sec
-    lda #200
+    lda SP_HEIGHT
     sbc SP_Y
     sta SP_BOT
     lda #0
@@ -899,10 +904,42 @@ chunk:
     jmp chunk
 .size draw_sprite_asm, .-draw_sprite_asm
 
-; REU -> C64: RF_LEN bytes from RF_REU to RF_C64 (u24/u16/u16), chained 256-byte DMAs (the REU's
-; addresses advance by themselves; each further piece costs two register writes).
+; REU -> C64: RF_LEN bytes from RF_REU to RF_C64 (u24/u16/u16), 256-byte DMAs. The first piece loads every
+; REU register, the next ones only the length and the command (the REU's addresses run on), unless
+; REU_DIRTY: the border painter's refill loaded them between pieces (asm/reu.S reu_transfer), or the REU
+; address crossed 64 KiB.
 .section .text.reu_fetch_chain,"ax",@progbits
 reu_fetch:
+    lda #1
+    sta REU_DIRTY
+1:  lda RF_LEN+1
+    beq 2f
+    lda #0
+    ldx #1
+    jsr reu_piece
+    inc RF_C64+1        ; + 256
+    inc RF_REU+1
+    bne 4f
+    inc RF_REU+2
+    inc REU_DIRTY
+4:  dec RF_LEN+1
+    jmp 1b
+2:  lda RF_LEN
+    beq 3f
+    ldx #0
+    jmp reu_piece
+3:  rts
+
+; One fetch of X:A bytes from RF_REU to RF_C64, after the painter's gate, with interrupts masked.
+reu_piece:
+97: bit P_GATE          ; the border painter's DMA gate (asm/reu.S)
+    bmi 97b
+    php
+    sei
+    sta $df07
+    stx $df08
+    lda REU_DIRTY
+    beq 98f
     lda RF_C64
     sta $df02
     lda RF_C64+1
@@ -913,24 +950,12 @@ reu_fetch:
     sta $df05
     lda RF_REU+2
     sta $df06
-1:  lda RF_LEN+1
-    beq 2f
     lda #0
-    sta $df07
-    lda #1
-    sta $df08
-    lda #$91
+    sta REU_DIRTY
+98: lda #$91
     sta $df01
-    dec RF_LEN+1
-    jmp 1b
-2:  lda RF_LEN
-    beq 3f
-    sta $df07
-    lda #0
-    sta $df08
-    lda #$91
-    sta $df01
-3:  rts
+    plp
+    rts
 
 .section .rodata.sprite_tables,"a",@progbits
 slot_addr:

@@ -162,8 +162,9 @@ bench_lookup:
     sta PTR+1
     .endr
     countdown
-    bne 0b
-    rts
+    beq 9f              ; (0b is out of a branch's reach: the bne wrapped; the branch audit found it)
+    jmp 0b
+9:  rts
 
 ; The whole run: every test, timed with CIA 2 timer A (counting down, 1 us), results as u16 us at
 ; RESULTS (+2 per test), $BE at RESULTS+30 when done. Table entries: routine, reps, DMA length.

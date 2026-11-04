@@ -291,10 +291,14 @@ pub(crate) fn hits(w: &mut World, c: (i16, i16), half: i16) -> u8 {
     n
 }
 
-/// Draw order of each kind: PIKEs and KESTRELs fly, shells above them.
+/// Draw order of each kind: PIKEs and KESTRELs fly, shells above them. Resident (read at render time by
+/// `sprites`, when any phase may be in the window; in the GROUND phase it read another phase's bytes and
+/// the C64 drew the units off their places).
+#[cfg_attr(target_arch = "mos", unsafe(link_section = ".rodata.resident.ground_z"))]
 static Z: [i8; 12] = [0, -3, -3, -3, -3, 3, 3, -3, -3, -3, -3, 4];
 
-/// Canvas (multicolor px × lines) of each unit kind; wrecks keep their unit's.
+/// Canvas (multicolor px × lines) of each unit kind; wrecks keep their unit's. Resident, as `Z`.
+#[cfg_attr(target_arch = "mos", unsafe(link_section = ".rodata.resident.ground_size"))]
 static SIZE: [(u8, u8); 12] = [
     (0, 0),
     (SKIFF_W as u8, SKIFF_H as u8),

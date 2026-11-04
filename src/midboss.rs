@@ -92,20 +92,72 @@ const DIRS: [(i8, i8); 48] = crate::boss::DIRS;
 
 /// The direction index closest to (`dx`, `dy`): the offset scaled to ±63 so the dot products stay in 16
 /// bits (32-bit multiplies cost the 6502 dearly; 48 directions need no more precision).
+///
+/// The same answer as the dot product over all 48 (`aim_full`, the reference; 96 multiplies a call, three
+/// turrets a tick: 2.3 ms a frame on the C64U), from the 9 around the middle of the offset's octant
+/// (`aim_matches_the_full_search` checks every offset the fight can see).
 #[inline(never)]
 fn aim(dx: i16, dy: i16) -> u8 {
     let m = dx.abs().max(dy.abs()).max(1);
     let (sx, sy) = (dx * 63 / m, dy * 63 / m);
+    // The octant's middle direction, 3 steps from the vertical or the horizontal axis.
+    let q = if sx.abs() <= sy.abs() { 3 } else { 9 };
+    let mut k = if sy >= 0 { q } else { 24 - q };
+    if sx < 0 {
+        k = 48 - k;
+    }
+    // The 9 from 4 below it, wrapping; the full search keeps the first (lowest) index of a tie: so does this.
+    k += 44;
     let (mut best, mut at) = (i16::MIN, 0u8);
-    let mut k = 0;
-    while k < 48 {
-        let (vx, vy) = DIRS[k];
+    let mut j = 0;
+    while j < 9 {
+        if k >= 48 {
+            k -= 48;
+        }
+        let (vx, vy) = DIRS[k as usize];
+        let d = mul63(vx, sx as i8) + mul63(vy, sy as i8);
+        if d > best || (d == best && k < at) {
+            best = d;
+            at = k;
+        }
+        k += 1;
+        j += 1;
+    }
+    at
+}
+
+/// `v * s` for |s| <= 63 by shift and add over s's 6 bits (the 6502's generic 16-bit multiply took ~400
+/// cycles: 0.5 ms a frame in this fight). Resident (`.uptext`): the MIDBOSS phase is full.
+#[inline(never)]
+#[cfg_attr(target_arch = "mos", unsafe(link_section = ".uptext.mul63"))]
+fn mul63(v: i8, s: i8) -> i16 {
+    let (mut x, mut y, mut r) = (v as i16, s, 0i16);
+    if y < 0 {
+        x = x.wrapping_neg();
+        y = y.wrapping_neg();
+    }
+    while y != 0 {
+        if y & 1 != 0 {
+            r = r.wrapping_add(x);
+        }
+        x = x.wrapping_shl(1);
+        y >>= 1;
+    }
+    r
+}
+
+/// The reference: the best dot product over all 48 directions (lowest index on a tie).
+#[cfg(test)]
+fn aim_full(dx: i16, dy: i16) -> u8 {
+    let m = dx.abs().max(dy.abs()).max(1);
+    let (sx, sy) = (dx * 63 / m, dy * 63 / m);
+    let (mut best, mut at) = (i16::MIN, 0u8);
+    for (k, &(vx, vy)) in DIRS.iter().enumerate() {
         let d = vx as i16 * sx + vy as i16 * sy;
         if d > best {
             best = d;
             at = k as u8;
         }
-        k += 1;
     }
     at
 }
@@ -412,6 +464,15 @@ mod tests {
     use super::*;
     use crate::game::Game;
     use crate::sim::{FIRE, LEFT, RIGHT};
+
+    #[test]
+    fn aim_matches_the_full_search() {
+        for dy in -600i16..=600 {
+            for dx in -600i16..=600 {
+                assert_eq!(aim(dx, dy), aim_full(dx, dy), "aim({dx}, {dy})");
+            }
+        }
+    }
 
     #[test]
     fn turret_yaw_points_its_barrels() {

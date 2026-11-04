@@ -175,6 +175,8 @@ def main():
     p = sub.add_parser('run'); p.add_argument('prg')
     p = sub.add_parser('dump'); p.add_argument('out'); p.add_argument('--hold', action='store_true')
     p = sub.add_parser('hold'); p.add_argument('value', type=int)
+    p = sub.add_parser('canvas', help='the border painter (the 160x240 canvas) on or off (F1 on the C64)')
+    p.add_argument('state', choices=['on', 'off'])
     sub.add_parser('status')
     sub.add_parser('bench')
     args = ap.parse_args()
@@ -199,6 +201,8 @@ def main():
         print('running', args.prg)
     elif args.cmd == 'hold':
         dev.write(HOLD, bytes([args.value]))
+    elif args.cmd == 'canvas':
+        dev.write(STATUS + 31, bytes([1 if args.state == 'on' else 0]))  # layout::status::CANVAS
     elif args.cmd == 'bench':
         # The `bench` build's results (target-c64 main.rs `bench`): u16 us per test at $CA60.
         raw = dev.read(0xCA60, 31)

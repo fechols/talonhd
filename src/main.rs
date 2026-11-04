@@ -17,7 +17,7 @@ use talonhd::bake::{self, Panorama};
 use talonhd::encode::SpriteImage;
 use talonhd::layout::{self, BUFFERS, status};
 use talonhd::model::{self, Machine};
-use talonhd::render::{self, Scroll};
+use talonhd::render;
 use talonhd::{demo, game, mesh, models, png, reference};
 
 /// S1 BREAKWATER's stage music: TALON's `cue.stage_s1`, encoded by `../sueme64`'s DLT5 encoder (THIRD-PARTY.md).
@@ -296,7 +296,7 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         want.color = vec![pal.color; 1000];
         want.screen = vec![pal.screen; 1000];
         check(&m, buf, &want).map_err(|e| format!("t={t}: {e}"))?;
-        png::save(&previews.join(format!("frames/t{t:04}.png")), 320, layout::VISIBLE as u32, &m.visible_with_hud(buf, img.palette.d021, scroll.fine))?;
+        png::save(&previews.join(format!("frames/t{t:04}.png")), 320, layout::CANVAS as u32, &m.canvas_with_hud(buf, img.palette.d021, scroll.fine))?;
     }
     println!("model matches reference compositor; stats {:?}", m.stats);
     println!("wrote {} and previews in {}", out.display(), previews.display());
@@ -445,7 +445,7 @@ fn cmd_bake_s2(args: &Args) -> Result<(), String> {
         want.color = vec![pal.color; 1000];
         want.screen = vec![pal.screen; 1000];
         check(&m, buf, &want).map_err(|e| format!("t={t}: {e}"))?;
-        png::save(&previews.join(format!("frames_s2/t{t:05}.png")), 320, layout::VISIBLE as u32, &m.visible_with_hud(buf, img.palette.d021, scroll.fine))?;
+        png::save(&previews.join(format!("frames_s2/t{t:05}.png")), 320, layout::CANVAS as u32, &m.canvas_with_hud(buf, img.palette.d021, scroll.fine))?;
     }
     println!("model matches reference compositor; stats {:?}", m.stats);
     println!("wrote {} and previews in {}", out.join("talonhd_s2.reu").display(), previews.join("frames_s2").display());
@@ -456,6 +456,12 @@ fn check(m: &Machine, buf: layout::Buffer, want: &reference::Expected) -> Result
     let codes = m.codes(buf);
     if let Some(i) = (0..codes.len()).find(|&i| codes[i] != want.codes[i]) {
         return Err(format!("pixel ({}, {}) code {} want {}", i % 160, i / 160, codes[i], want.codes[i]));
+    }
+    let (top, bottom) = m.band_codes(buf);
+    for (what, got, want) in [("top", &top, &want.top), ("bottom", &bottom, &want.bottom)] {
+        if let Some(i) = (0..got.len()).find(|&i| got[i] != want[i]) {
+            return Err(format!("{what} band pixel ({}, {}) code {} want {}", i % 160, i / 160, got[i], want[i]));
+        }
     }
     for i in 0..1000 {
         let s = m.ram[(buf.screen + i as u16) as usize];
@@ -484,7 +490,7 @@ fn cmd_preview(args: &Args) -> Result<(), String> {
     let g = game::replay_level(img.level, top, t as u32);
     let (mut m, img) = image_for(&path, (m, img), &g)?;
     let scroll = model::render_game(&mut m, &img, &g, BUFFERS[0]);
-    png::save(&out, 320, layout::VISIBLE as u32, &m.visible_with_hud(BUFFERS[0], img.palette.d021, scroll.fine))?;
+    png::save(&out, 320, layout::CANVAS as u32, &m.canvas_with_hud(BUFFERS[0], img.palette.d021, scroll.fine))?;
     println!("t={t}: {:?}", m.stats);
     Ok(())
 }
@@ -512,7 +518,7 @@ fn cmd_compare(args: &Args) -> Result<(), String> {
     let g = game::replay_level(img.level, st[status::TOP as usize], t as u32);
     let (mut m, img) = image_for(&path, (m, img), &g)?;
     println!("tick {t}: attract-mode replay (score {}, lives {}, stage line {})", g.world.score, g.world.lives, g.world.scroll_lines());
-    let scroll: Scroll = model::render_game(&mut m, &img, &g, front);
+    let scroll = model::render_game(&mut m, &img, &g, front);
 
     let bitmap = read(&dump.join("bitmap.bin"))?;
     let screen = read(&dump.join("screen.bin"))?;
@@ -538,7 +544,11 @@ fn cmd_compare(args: &Args) -> Result<(), String> {
     for (i, &c) in color.iter().enumerate() {
         dev.color_ram[i] = c & 15;
     }
-    png::save_wide(&dump.join("device.png"), 160, &dev.visible(front, img.palette.d021, scroll.fine))?;
+    if let Ok(bands) = read(&dump.join("bands.bin")) {
+        let set = layout::band_set(front) as usize;
+        dev.reu[set..set + bands.len()].copy_from_slice(&bands);
+    }
+    png::save_wide(&dump.join("device.png"), 160, &dev.canvas(front, img.palette.d021, scroll.fine))?;
     for (i, &b) in screen.iter().enumerate() {
         if b != m.ram[front.screen as usize + i] {
             bad += 1;
@@ -549,9 +559,38 @@ fn cmd_compare(args: &Args) -> Result<(), String> {
             bad += 1;
         }
     }
+    // The border bands the painter shows with this buffer (emu64 dumps them; a hardware dump does not yet).
+    // The colours the border painter stored to $D020 for this frame (emu64 records them): the model's
+    // bands through the palette, as the painter's decode tables map them.
+    if let Ok(painted) = read(&dump.join("painted.bin")) {
+        let (top, bottom) = m.band_codes(front);
+        let scr = m.ram[front.screen as usize];
+        let colour = |code: u8| match code {
+            0 => m.d021,
+            1 => scr >> 4,
+            2 => scr & 15,
+            _ => m.color_ram[0] & 15,
+        };
+        let want: Vec<u8> = top.iter().chain(bottom.iter()).map(|&c| colour(c)).collect();
+        let differ = painted.iter().zip(&want).filter(|(a, b)| a != b).count() + want.len().abs_diff(painted.len());
+        if let Some(i) = (0..painted.len().min(want.len())).find(|&i| painted[i] != want[i]) {
+            println!("painted line {} pixel {}: colour {} want {} ({differ} differ)", i / 160, i % 160, painted[i], want[i]);
+        }
+        println!("painted border: {} pixels, {differ} differ", painted.len());
+        bad += differ;
+    }
+    if let Ok(bands) = read(&dump.join("bands.bin")) {
+        let set = layout::band_set(front) as usize;
+        let want = &m.reu[set..set + bands.len()];
+        let differ = bands.iter().zip(want).filter(|(a, b)| a != b).count();
+        if let Some(i) = (0..bands.len()).find(|&i| bands[i] != want[i]) {
+            println!("bands +{i:04x}: {:02x} want {:02x} ({differ} differ)", bands[i], want[i]);
+        }
+        bad += differ;
+    }
     let micros = st[status::RENDER_US as usize] as u16 | (st[status::RENDER_US as usize + 1] as u16) << 8;
     println!("t={t} front={} render={micros} us: {bad} mismatched bytes", st[status::FRONT as usize]);
-    png::save_wide(&dump.join("model.png"), 160, &m.visible(front, img.palette.d021, scroll.fine))?;
+    png::save_wide(&dump.join("model.png"), 160, &m.canvas(front, img.palette.d021, scroll.fine))?;
     if bad == 0 { Ok(()) } else { Err(format!("{bad} bytes differ")) }
 }
 

@@ -65,8 +65,9 @@ pub const REU_BANK: u32 = 0x8_0000;
 /// multiplexes the HUD sprites) is stalled for the whole transfer: 256 bytes
 /// is ~70 µs (about a raster line), inside the IRQ's ~2-line slack (`hud`).
 pub const MAX_DMA: u16 = 256;
-/// HUD sprite blocks (64 bytes each) copied into both VIC banks at boot.
-pub const HUD_BLOCKS: u16 = 48;
+/// HUD sprite blocks (64 bytes each) in the REU: the first `hud::block::SLOTS` are copied into both VIC
+/// banks at boot, then the live readouts' variants and the multiplexer's static pointers (`hud::variant`).
+pub const HUD_BLOCKS: u16 = 51;
 
 pub mod header {
     pub const MAGIC: usize = 0;

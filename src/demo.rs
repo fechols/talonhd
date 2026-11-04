@@ -225,8 +225,10 @@ pub fn icos_fine(p: u16) -> i16 {
 #[inline(never)]
 #[cfg_attr(target_arch = "mos", unsafe(link_section = ".hitext"))]
 pub fn bank(v: i16, banks: u16) -> u16 {
-    let half = (banks / 2) as i32;
-    let i = (v as i32 * half + if v >= 0 { 63 } else { -63 }) / 127;
+    // 16-bit: |v| <= 127 and banks <= 64 keep v * half + 63 under 4,100 (the i32 form pulled libcrt's
+    // 32-bit divide, ~580 bytes of main RAM, into the C64 program for this one call).
+    let half = (banks / 2) as i16;
+    let i = (v * half + if v >= 0 { 63 } else { -63 }) / 127;
     (half + i.clamp(-half, half)) as u16
 }
 
@@ -345,6 +347,14 @@ mod tests {
         assert_eq!(isin(0), 0);
         assert_eq!(isin(64), 127);
         assert_eq!(isin(192), -127);
+        // The 16-bit form equals the 32-bit one it replaced over every input it can get.
+        for banks in 1..=64u16 {
+            for v in -127i16..=127 {
+                let half = (banks / 2) as i32;
+                let i = (v as i32 * half + if v >= 0 { 63 } else { -63 }) / 127;
+                assert_eq!(bank(v, banks), (half + i.clamp(-half, half)) as u16, "bank({v}, {banks})");
+            }
+        }
         assert_eq!(bank(0, 9), 4);
         assert_eq!(bank(127, 9), 8);
         assert_eq!(bank(-127, 9), 0);

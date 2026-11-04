@@ -439,3 +439,35 @@ a segment-list DMA and a job per column). Small sprites (bullets) should not tou
   an unrolled 8-way block entered by length (Duff), one index across a run's cell rows, and a band's visible
   range fetched in one go when it fits: QUEEN frames 7.80 -> 7.24 ms (t 10,252) and 7.02 -> 6.55 ms (t 10,792).
   Two out-of-range branches (the assembler mis-encodes them silently) were caught by `test_blit.py`.
+
+## The 160×240 canvas on the C64U, and frame costs with the border painter (2026-11-04)
+
+- Typo's `$D020` painter, hardware YSCROLL scrolling and the badline kernel: every painted row pixel-exact on
+  the C64U (screenshots, all 48 rows, at every YSCROLL); held frames equal the host replay (`compare`, 0
+  mismatched bytes at ticks 753, 1492, 3793 and 5391, the last in the KEELBREAKER fight); emu64 with garbage
+  RAM: frame, bands and all 7,680 painted pixels equal the host. Music 0 underruns.
+- Tried and dropped: refilling the staging a line at a time in each painted line's idle tail. Lines with
+  HUD sprites in the border went 8-16 dots late (the VIC's sprite fetches eat that tail); the refill after
+  each block stays (~0.55 ms a frame in all).
+- Frame costs (`-Features timing,profile`, `tools/timing_log.py`; IRQ time left out of the laps by the IRQ
+  clock): the painted blocks take 3.82 ms of every frame, leaving ~12.85 ms for the main loop at 60 fps.
+  Fixes so far, all bit-exact (the replay is unchanged):
+  - `midboss::aim`: 9 directions around the octant's middle instead of all 48 (proved equal over ±600 by
+    `aim_matches_the_full_search`), with a 6-bit shift-add multiply: KEELBREAKER step 6.7 -> 3.65 ms;
+  - `reu_transfer` (asm) replaces the Rust `hw::transfer` loop, and the pieces after the first (also the
+    sprite fetches') write only length and command, the REU's addresses running on (`REU_DIRTY` when the
+    painter's refill used the REU): background 4.5 -> 3.7 ms, ACE 1.85 -> 1.5, HUD 0.65 -> 0.5;
+  - a page-loop `__memset` (~9 instead of ~25 cycles a byte).
+  S1 attract, fps per 300 ticks, before -> after: light stretches 58-60 -> 60; 708-1007 37 -> 56;
+  1908-2207 35 -> 47; 3410-3709 30 -> 41; 4310-4608 50 -> 60. Still 30-35: the busiest wave stretches
+  (1640-1940, 3740-4340) and the KEELBREAKER fight (4940-6140): sprites 3.3-3.8 ms (window) + 0.9 (bands),
+  render 12.5-13.4 ms raw; ~2.5 ms still to find there. The AUDIO page (~1 ms) stays: the band rows at
+  $9800 overwrite it every frame; pre-decoding the music into the REU does not fit (the S1 image is 99.1 %).
+- The canvas became a runtime option, off by default (F1, `status::CANVAS`). Off, on the C64U (normal build,
+  S1 attract to tick 17,900): 59.8 fps in every 600-tick window, KEELBREAKER and GANTRY QUEEN included;
+  the only dip (46) is the stage clear's window, which holds the S2 image load. Toggled remotely
+  (`c64u.py canvas`), several times in a row: rows exact when on, plain border when off; held frames equal
+  the host in both modes (ticks 2003 off, 2150 on). emu64: 0 mismatched bytes off; with `--painter` the
+  frame, bands and 7,680 painted pixels as before.
+- `demo::bank` in 16 bits (equal to the i32 form over all inputs): libcrt's `__divsi3`/`__udivsi3` left the
+  program, main RAM free 39 -> 644 bytes.

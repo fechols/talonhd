@@ -65,11 +65,14 @@ pwsh scripts/build-windows.ps1           # -> dist/talonhd.prg, dist/talonhd.elf
 python tools/test_blit.py                # asm sprite kernel draw_cols vs reference in a 6502 interpreter
 python tools/test_sprite.py [n] [image]  # asm draw_sprite (cache, bands, chunks, clipping) vs reference, on a baked image
 python tools/c64u.py bench               # with a `-Features bench` build: the C64U's unit costs (I/O write, DMA, stores)
-python tools/test_hud_irq.py             # HUD raster IRQ vs the table contract
+python tools/test_hud_irq.py             # HUD raster IRQ vs the table contract, and its chain with the border painter
 python tools/check_phases.py             # REU paging audit: resident code enters the window only at phase entries; a
                                          # phase's calls/jumps land only on its own functions (phases share addresses)
-python tools/emu64.py --frames 160       # the real PRG in a 6502 + REU + $01 model: finds 6502-only faults
-                                         # (--level-dir dist: + the UCI, serving the per-level load)
+python tools/emu64.py --frames 160       # the real PRG in a 6502 + REU + $01 + raster IRQ + CIA1 timer A model
+                                         # (add --painter for the canvas: the painted border is checked only then):
+                                         # finds 6502-only faults (--level-dir dist: + the UCI, the per-level load;
+                                         # --dump DIR: a `c64u.py dump` + the band set + the colours the border
+                                         # painter stored, for `compare`: frame, bands and painted border vs the host)
 pwsh scripts/build-windows.ps1 -Features start-keel   # debug: the attract game starts just before the midboss
 pwsh scripts/build-windows.ps1 -Features start-boss   # debug (S2 image, bake it after): just before the ASTROLABE
 pwsh scripts/build-windows.ps1 -Features start-s2     # debug: boot S1's image, load S2's at once (emu64 --level-dir)
@@ -77,7 +80,8 @@ pwsh scripts/build-windows.ps1 -Features start-s2     # debug: boot S1's image, 
 
 Always run `tools/test_blit.py` and `tools/test_sprite.py` (after a bake) after touching `target-c64/asm/blit.S`; write
 named conditional branches as `bxx 90f / jmp label / 90:` (the assembler silently mis-encodes
-out-of-range branches). Hardware (`C64U_HOST` = device IP): `python tools/c64u.py config`, `upload-levels`
+out-of-range branches; `tools/branch-audit.py`, from typo, runs on every C64 build and fails it), and never
+add a numeric local label between a branch and the label it means (`beq 2f` then a new `2:` takes it). Hardware (`C64U_HOST` = device IP): `python tools/c64u.py config`, `upload-levels`
 (both level images to `/Usb0/talonhd` over FTP, for the per-level load), `run dist/talonhd.prg`,
 then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset), `dump dist/dump --hold`,
 `cargo run --release -- compare --dump dist/dump` (it picks the image of the level the replay reached).
@@ -91,15 +95,58 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   top to bottom; frames pre-shifted ×4 (or ×1, drawn at `x & !3`), banded column records (below). Memory map
   as gclass except: code `$0801-$4BFF`, buffers `$4C00/$6000` and `$8C00/$A000`, HUD sprite blocks `$5000`
   (bank 1, pointers 64+) and `$8000` (bank 2, pointers 0+; never `$9000`: char ROM shadow), `SEG_BUF $C000`,
-  `JOB $CA00`, sprite job `$CAA0` (`draw_sprite_asm`), `STATUS $CA80`, `HUD_TABLE $CB00`, the small-sprite cache
-  `$E000-$E40F`, `CHUNK`/`OFFS` in `SEG_BUF`. REU DMAs ≤ 256 bytes (`MAX_DMA`) so the
-  HUD's raster IRQ always lands in its 3-line gap.
+  `JOB $CA00`, sprite job `$CAA0` (`draw_sprite_asm`; `SP_HEIGHT $CAD7`), `transpose_row` job
+  `$CAD8`, `STATUS $CA80`, the border painter's block `$CAE0` (`layout::painter`), `HUD_TABLE $CB00` (+ the live
+  slots' `HUD_SHOWN`), the small-sprite cache `$E000-$E40F`, `CHUNK`/`OFFS` in `SEG_BUF`; the painter's staging
+  `$5800-$5BFF`, decode tables `$8700-$8AFF`, code `$8600` and `$8B00`; the band sets at REU `$FFF000`. REU DMAs ≤
+  256 bytes (`MAX_DMA`) so the HUD's raster IRQ always lands in its 3-line gap.
 - **HUD** (`src/hud.rs`, `asm/hud.S`): 8 hires sprites multiplexed into 8 rows (64 instances) by a raster IRQ that
-  reads `HUD_TABLE`; static art and few-state readouts are baked blocks chosen by pointer, only score and
-  stage digits are written per frame. Damage flash white → red → green via `$D027-$D02E`. Run
-  `tools/test_hud_irq.py` after touching `asm/hud.S`.
-- **Vertical scroll.** `Scroll { coarse, fine }`: 25 rows DMA'd from row `coarse`; 24-row mode with YSCROLL
-  `7 - fine` shows bitmap lines `fine..fine+192`; sprites are drawn `fine` lines lower.
+  reads `HUD_TABLE`. 22 sprite slots per VIC bank (`hud::block`); a few-state readout (tapes, ladders, lives,
+  speed) is one LIVE slot that `render::hud_update` refreshes from its variant in the REU (`hud::variant`, 63-byte
+  DMA) when the state changes, in the bank just shown (the other bank catches up when shown); the pointer table
+  is static (fetched at boot) but for the gauge's 4. Only score and stage digits are drawn per frame. Run
+  `tools/test_hud_irq.py` after touching `asm/hud.S`; `the_hud_table_and_live_slots_follow_the_state`.
+- **The canvas** (user: "real vertical-scroller aspect ratio"; typo's border painter, `THIRD-PARTY.md`; view only:
+  the sim's playfield is unchanged). A runtime option, **off by default** (user: solid 60 fps; it costs
+  ~6 ms a frame and the busiest stretches drop to 30 with it): **F1** flips `status::CANVAS` (main's
+  `canvas()`; `c64u.py canvas on|off`, emu64 `--painter`). Off: the same 24-row scrolled bitmap, plain
+  border, no band rows, band blits or stash (`restore_background(.., bands)`), the plain HUD chain; turning
+  off stops the painter and waits for the chain to settle, turning on shows one frame the old way, then
+  `painter::ON`. On: 160×240, the 24-row bitmap (raster 55..246) scrolled by the hardware
+  (`$D011` YSCROLL = 7 - `fine`) and 24 lines painted through `$D020` above it (block T, raster 31..54) and
+  below (block B, 247..262, 0..7). `Scroll { coarse, fine }` (`render.rs`): `coarse` is the panorama row of
+  bitmap row 0, sprites are drawn `fine` lines lower; 40 columns always (the shake is vertical only).
+  `render::restore_background` (BANDS phase) fetches the bitmap's 25 cell rows in one chained DMA and the
+  band rows -3..-1 and 25..27 into `layout::BANDS` ($9800, the window's tail: AUDIO is re-paged every
+  frame); `draw_canvas` draws a sprite into the bitmap and again into each band it reaches
+  (`draw_sprite_asm` takes a target and `SP_HEIGHT`, leaves `SP_H`); `stash_bands` transposes each block's 4
+  cell rows line-major (`Hw::transpose_row`, `asm/bands.S`) into `SEG_BUF` and stashes the 24 lines from
+  line `fine` to the buffer's set (`layout::band_set`: REU $FFF000 + $800 per buffer, T then B, 960 B each).
+  Previews and `compare` show 320×240 (`model::canvas`, `band_codes`).
+- **Border painter** (`asm/border.S`, `asm/hud.S`): the HUD IRQ chain is row 0 @20, the DMA gate @27, block T
+  @30, rows 1..7, the gate @243, block B @246. A block waits for CIA1 timer A's underflow (one line, phased
+  once by `border_sync`), spins to `TA`, re-aligns with a `$D031` toggle, trims (`DF`, 1-cycle sled) and
+  delays (`DL`), then the kernel: 40 bytes from the staging ($5800, line-major, 6 lines a page), 63 cycles a
+  byte, stores at +0/16/32/48 through `dec0..3` (rebuilt by `border_tables` on every palette write), the
+  border colour (`painter::BORDER`, the hit flash) at the corner. The line on a badline (block T: line 17 +
+  YSCROLL, none for 7; block B: line 0 for YSCROLL 7) runs `border_kbad` (62 cycles a byte, its own delays
+  `DLB`/`DFB`, 71/4: the VIC's character fetches steal a cycle per 8 bytes). Then the block refills the
+  staging with the other block's lines (four 240-byte DMAs; refilling in each line's idle tail made lines
+  with HUD sprites in the border late) and opens the gate; block B also does the main loop's flip
+  (`painter::FLIP`: bank, `$D016`, `$D011` = `PAINTER_D011` with the frame's YSCROLL, band set, together).
+  Every foreground DMA waits while the gate is closed and is atomic (php/sei, all registers, trigger, plp:
+  the C64U's REU registers do not read back reliably, so the IRQ never saves them). Timing code lives in the
+  one-page `.ptext` ($8600): nothing in it can cross a page. Off (`painter::ON` 0) until the first frame is
+  shown the old way. Calibrated on the C64U (`TA/DL/DF/AOFS/SYNC` 37/73/2/26/100, poke-able at `$CAE6`):
+  every painted row pixel-exact at every YSCROLL; `LATEBLK` counts skipped blocks. The painted blocks cost
+  ~3.8 ms of every frame (IRQ clock below).
+- **Frame timing** (`-Features timing`, `profile`): laps into the status block (`layout::status`: RENDER,
+  BACKGROUND, AUDIO, STEP, ACE, HUD, WAIT = slack before the flip; `profile`: the window's and the bands'
+  sprite blits and the sprite count), all but RENDER/BACKGROUND/STEP leaving out IRQ time: `asm/hud.S`
+  `irq_clock_*` adds every raster IRQ's microseconds to `status::IRQ_US` (always on). `python
+  tools/timing_log.py log 180 t.csv` on the C64U, `summary t.csv` per 300 ticks; `examples/frame_census.rs`
+  joins a log with the model's work; `tools/emu64.py --profile FLIP` charges cycles (plus the C64U's REU-DMA
+  and I/O-write costs) to functions, phases resolved by the one paged in.
 - **3D bake** (`src/raster3d.rs`, host): mesh + `Orient` (roll, pitch, yaw) + `View` → `SpriteImage`. 4×4
   supersampled z-buffer, one key light (`LIGHT`), per-face Lambert quantized in half steps along each
   material's code ramp (half step = sprite-space checkerboard), emissive materials. Units: 1 = one hires pixel.
@@ -226,7 +273,7 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   plays TERRACES again as stage 3 in S3's colors (no S3 yet).
   A game over on a later stage sets S2's fights GONE (not stepped at their hold behind the GAME OVER;
   below their lines the new game resets them, `hot` its own).
-  Tests: `stage2::tests` (ACE flies S2 through both fights and the clear as the PEREGRINE: 1 death, 13,529 ticks).
+  Tests: `stage2::tests` (ACE flies S2 through both fights and the clear as the PEREGRINE: 1 death, 13,377 ticks).
 - **CAMPANILE** (`src/campanile.rs`, S2 midboss; its step and render-time `sprites` live in the S2 phase, the
   sprites paged by `game::scene` only while it is shown): the tower is level geometry, the crown (8 spin
   samples, a clock-hand step every 6 ticks, every 2 winding up for a ring, reversed in phase 2) and the hub
@@ -286,7 +333,7 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   flight; bosses publish their live weak part (`Boss::aim`, `Midboss::aim`). Three phases a tick (ATTRACT
   `see`, MOTOR `motor`, ACE `think`), sharing a `Mind` in `SEG_BUF`; its memory (`Ace`, 12 B) is in the
   `Game`, so the replay and `compare` stay exact. Time-sliced: one phase a tick (see, motor, think; a decision
-  every 3 ticks, the Mind parked in the REU at `ace::MIND_REU` between ticks). Host: `the_ace_outflies_the_autopilot`
+  every 3 ticks, the Mind parked in the REU at `ace::MIND_REU` between ticks, but not fetched before `see`, which initialises it: nothing may carry from `think` to the next `motor`, `the_mind_needs_nothing_from_before_see`; a `coast` set in `think` made the C64 diverge from the replay). Host: `the_ace_outflies_the_autopilot`
   (16,000 ticks: 1 death, both bosses; the vendored autopilot: 10
   deaths, 3,100), `examples/ace_death.rs` (the world before any death),
   `the_ace_flies_smoothly`; `cargo run --release --example ace_trace` prints its flight log. The vendored
@@ -312,11 +359,9 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   (`models::shield_frames`: waves that follow the hull's silhouette outward, `light` fading to `dark` dots).
 - **Hit feedback** (user): the HUD never flashes. The border ramps black, dark grey, light grey, white, light
   red, red, light red, light grey, dark grey, black (`hud::FLASH_RAMP`, 2 frames a step); the camera shakes
-  for 24 frames (`game::SHAKE_X/Y`: per axis two sines of different frequency and amplitude under a
-  decaying envelope, compile-time tables, up to ±12 px / ±6 lines). Vertically the panorama window and
-  sprites move; sideways whole 8-px columns shift the background copy (`Scroll::col`, wrapped-in columns
-  blanked) and the sprites, and XSCROLL (38-column mode, rest 4) does the rest. The HUD sprites move the
-  opposite way (`hud::xs`, `hud::build`'s Ys and IRQ lines).
+  for 24 frames, vertically only (user: no 38-column squeeze; `game::SHAKE_Y`: two sines of different
+  frequency and amplitude under a decaying envelope, a compile-time table, up to ±6 lines): the panorama
+  window and the sprites move. The HUD sprites move the opposite way (`hud::build`'s Ys and IRQ lines).
 - **Frames and panorama:** `demo.rs` is the frame directory (boss body, arms, legs, WASP yaws, TALON banks,
   GANNET pitches, shots, bursts, SPARKs) plus the boss's flight (`PART_XY0` + compile-time `PART_DX`; no trig
   on the C64). Her six parts have one frame per body bank sample (`hand::queen_part_frames`, rendered at bake
@@ -326,13 +371,14 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   renders it in strips with `raster3d::render_scene` under the stage light with cast shadows
   (`ShadowMap`, normal-offset lookups); ground materials void/dark only, `light` for surf and paint, `hot`
   for crystal (`output/sheets/panorama.png`).
-- **C64 code space** (`target-c64/link.ld`, `opt-level = "s"`): `$0801-$4BFF` plus five regions copied at boot
+- **C64 code space** (`target-c64/link.ld`, `opt-level = "s"`; `"z"` makes every region bigger): `$0801-$4BFF` plus regions copied at boot
   from one load image at `$4C00-$8FFF` (frame-buffer/HUD space, free until the first frame): `.hitext`
   `$E410-$FEFF` (HUD, boss flight, `sim::actors`, small game helpers), `.midtext` `$9000-$9FFF` (VIC sees
   char ROM, CPU RAM: `sim::collide/gauge`), `.lowtext` `$0200-$07FF` (`render`), `.uptext` `$5C00-$5FFF`
   (`sim::common/world`, `hw`), `.iotext` `$D000-$DFFF`, the RAM under the I/O chips (`sim::collide/gauge`):
   the game step runs with `$01 = $34`, so only pure code may live there, and `asm/hud.S` banks I/O in for
-  itself. `$9000-$9FFF` is the paging window. Placement is by mangled
+  itself; `.vtext` `$5600-$57FF` (`hud::live`, `level_image`), `.ptext` `$8600` and `.p2text` `$8B00` (the border
+  painter), in the HUD space the live slots freed. `$9000-$9FFF` is the paging window. Placement is by mangled
   name in the link script (or `#[cfg_attr(target_arch = "mos", unsafe(link_section = ".hitext"))]`). Every
   region is nearly full: check `llvm-size -A dist/talonhd.elf` after changes. The sprite list lives in
   `.lowbss` (NOLOAD, the tail of `$0200-$07FF`); main RAM had 2 bytes free after the ground units. 6502
@@ -368,14 +414,19 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
 - **Boot:** the PRG erases the REU magic, then waits for magic + whole-image checksum, so `run` then `upload-reu`
   always starts on the complete new image.
 - **6502 size:** never u32/i32 math in our code (user: "massive code bloat"); a u32 `%` in `lines()` cost
-  over 400 bytes of resident RAM. Check `llvm-size -A dist/talonhd.elf` and the link map after changes.
+  over 400 bytes of resident RAM, and one i32 divide in `demo::bank` pulled libcrt's `__divsi3` +
+  `__udivsi3` (~580 bytes; now 16-bit, gone). Check `llvm-nm` for `si3` helpers after changes. Check `llvm-size -A dist/talonhd.elf` and the link map after changes.
   LLVM inlines single-caller functions into `main` (resident RAM): `game::view` and `render::sort_by_z`
   are `#[inline(never)]` to stay in their regions; never pass `&mut` to main's `Image` (it moves to the
   soft stack, every field access indirect): return it by value.
-- **Next:** the per-level load on the C64U (`upload-levels`, the `start-s2` build, its load time; then ACE's
+- **Next:** 60 fps with the painter (S1's busy stretches and fights run at 30: see `docs/validation.md`), then
+  the per-level load on the C64U (`upload-levels`, the `start-s2` build, its load time; then ACE's
   attract run through S1's clear into S2). Then S3 REDLINE (`docs/story/hd/models/s3.md`, approved): per-level
-  phase slots first (14 of 15 phase ids are used; S3 needs ~4), then `src/s3.rs`, the hand models, the CARACARA
+  phase slots first (15 of 15 phase ids are used, the last by BANDS; S3 needs ~4), then `src/s3.rs`, the hand models, the CARACARA
   (`ship::BUILT` = 3), its waves and fights; and animation loops for the other stages. Memory ideas from the
   sibling repos still open: `opt-level "z"`, zero page `$90-$FF`, boot-only code in a retired section,
   borrow-and-restore overlays (impact), an IRQ static-frame audit (sueme64).
-- **Hardware quirk:** `c64u.py run` right after `config` can reset the machine before the PRG loads; run again.
+- **Hardware quirks:** `c64u.py run` right after `config` can reset the machine before the PRG loads; run again.
+  After a C64U restart run `config` before `run` (else the sampler is missing: `NO_SAMPLER`/`TIMEOUT`). Boot
+  takes ~30 s after `upload-reu` (the whole-image checksum): poll `status` for ticks before judging a hang.
+  RAM survives a reset (the startup clears the painter block: a stale gate bit hung the main loop).

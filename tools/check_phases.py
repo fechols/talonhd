@@ -5,7 +5,11 @@
   declared phase entry point (`ENTRIES`: called right after `paging::page`);
 - a phase's code only jumps into its own bytes or into resident code (never another phase, which would
   share the same addresses), and never through an indirect JMP;
-- the bootstrap call to `talonhd_page` is the only way in (not checked: entry is by Rust call after page).
+- the bootstrap call to `talonhd_page` is the only way in (not checked: entry is by Rust call after page);
+- data: resident code never reads or writes an absolute address in the window (a table linked into a phase
+  but read at render time read whatever phase was in: `ground::SIZE` drew the C64's units off their
+  places), and a phase's absolute operands in the window land on its own symbols (or, for BANDS, its band
+  area `layout::BANDS`).
 
     python tools/check_phases.py [dist/talonhd.elf]
 """
@@ -18,10 +22,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_blit import wsl_path  # noqa: E402
 
 WINDOW = (0x9000, 0xA000)
+# layout::BANDS: the BANDS phase composes the border bands in the window's second half.
+BANDS = (0x9800, 0xA000)
 # Phase entry points (mangled-name fragments), each called only after paging its phase in.
 ENTRIES = ('7Midboss4step', '6Ground4step', '5audio7service', '5audio5prime', '5audio4tune3arm',
            '5audio4tune7started', '5audio4tune9calibrate', '5audio4tune4load', '4game4Game5reset',
-           '14install_phases', '10boot_image', '8boot_irq', '10load_level', '4boss4Boss4step', '6replay9autopilot', '3ace3see', '3ace5motor', '3ace5think', '5clear5Clear4step', '5clear5Clear7sprites', '5clear5Clear7restart', '4ship3fly', '6stage25waves', '9Campanile4step', '9Campanile7sprites', '9Astrolabe4step', '9Astrolabe7sprites', '4gnd24step', '4air24step', '4game4Game8reset_at', '6render8hud_init', '6render10read_image',
+           '14install_phases', '10boot_image', '8boot_irq', '10load_level', '4boss4Boss4step', '6replay9autopilot', '3ace3see', '3ace5motor', '3ace5think', '5clear5Clear4step', '5clear5Clear7sprites', '5clear5Clear7restart', '4ship3fly', '6stage25waves', '9Campanile4step', '9Campanile7sprites', '9Astrolabe4step', '9Astrolabe7sprites', '4gnd24step', '4air24step', '4game4Game8reset_at', '6render8hud_init', '6render10read_image', '6render18restore_background', '6render11stash_bands', '11draw_canvas',
            '6render12verify_image', '6render16invalidate_image', 'bench_all')
 
 
@@ -39,7 +45,7 @@ def main():
         if len(p) >= 4 and p[0].isdigit():
             sections[p[1]] = (int(p[3], 16), int(p[2], 16))
     phases = {n: s for n, s in sections.items() if n.startswith('.phase.')}
-    code = [n for n in sections if n.startswith('.text') or n in ('.hitext', '.lowtext', '.uptext', '.iotext')]
+    code = [n for n in sections if n.startswith('.text') or n in ('.hitext', '.lowtext', '.uptext', '.iotext', '.vtext', '.ptext', '.p2text')]
     entries = set()
     # Every phase's own code ranges (its symbols): all phases share the window's addresses, so a jump to a
     # window address is only safe if that address is code of the same phase.
@@ -53,9 +59,20 @@ def main():
             owned[p[-3]].append((addr, max(size, 1)))
     errors = []
     call = re.compile(r'^\s*([0-9a-f]+):.*\t(jsr|jmp)\t(\(?)\$([0-9a-f]+)')
+    data = re.compile(r'^\s*([0-9a-f]+):.*\t(lda|ldx|ldy|sta|stx|sty|adc|sbc|and|ora|eor|cmp|cpx|cpy|bit|inc|dec|asl|lsr|rol|ror)\t\$([0-9a-f]{4})\b')
     for name in code + list(phases):
         start, size = sections[name]
         for line in objdump(elf, '-d', f'--section={name}').splitlines():
+            d = data.match(line)
+            if d:
+                at, op, target = int(d.group(1), 16), d.group(2), int(d.group(3), 16)
+                if WINDOW[0] <= target < WINDOW[1]:
+                    if name not in phases:
+                        errors.append(f'{name} ${at:04x}: resident {op} ${target:04x} (data in the window)')
+                    elif not any(a <= target < a + n for a, n in owned[name]) and not (
+                            name == '.phase.bands' and BANDS[0] <= target < BANDS[1]):
+                        errors.append(f'{name} ${at:04x}: {op} ${target:04x} is not this phase\'s data')
+                continue
             m = call.match(line)
             if not m:
                 continue

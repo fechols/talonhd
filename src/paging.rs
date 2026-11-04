@@ -47,10 +47,14 @@ pub const S2GND: u8 = 11;
 pub const S2AIR: u8 = 12;
 /// S2's boss, the ASTROLABE (`astrolabe::Astrolabe::step`, and at render time its `sprites`).
 pub const ASTRO: u8 = 13;
-pub const PHASES: u8 = 14;
+/// The canvas's background (`render::restore_background`: the ring and the line shift) and the border
+/// bands (`draw_canvas`, `render::stash_bands`), paged every frame before the background; the bands are
+/// composed in the window's second half (`layout::BANDS`), so it is free of code while a frame is drawn.
+pub const BANDS: u8 = 14;
+pub const PHASES: u8 = 15;
 const _: () = assert!(PHASES <= 15, "the header's last phase-length byte is the level (`format::header::LEVEL`)");
 /// Phase names (`dist/phases/<name>.bin`, `.phase.<name>` in `link.ld`), in id order.
-pub const NAMES: [&str; PHASES as usize] = ["boss", "attract", "midboss", "boot", "ground", "audio", "tune", "ace", "motor", "stage", "s2", "s2gnd", "s2air", "astro"];
+pub const NAMES: [&str; PHASES as usize] = ["boss", "attract", "midboss", "boot", "ground", "audio", "tune", "ace", "motor", "stage", "s2", "s2gnd", "s2air", "astro", "bands"];
 
 /// The stamp tying a level image's phases to the PRG built with them: an additive checksum of every
 /// phase image but `BOOT`'s (`scripts/build-target.sh` patches it into the PRG; `bake` into the header).

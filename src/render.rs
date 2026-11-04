@@ -169,6 +169,7 @@ pub fn verify_image<H: Hw + ?Sized>(hw: &mut H, img: &Image) -> bool {
 /// Show `pal`: one `$D021` write, a fill of both buffers' screen RAM and of
 /// color RAM. Neither is double-buffered, so call it in vertical blank
 /// (palette effects: flashes, boss phases, stage transitions).
+#[inline(never)]
 pub fn set_palette<H: Hw + ?Sized>(hw: &mut H, pal: Palette) {
     hw.poke(0xD021, pal.d021);
     for b in layout::BUFFERS {
@@ -182,9 +183,14 @@ pub fn set_palette<H: Hw + ?Sized>(hw: &mut H, pal: Palette) {
 /// On the C64 these boot-only functions are the `BOOT` paged phase (`crate::paging`).
 #[inline(never)]
 pub fn hud_init<H: Hw + ?Sized>(hw: &mut H, img: &Image) {
-    for base in layout::HUD_BLOCK_BASE {
-        hw::fetch(hw, img.hud, base, format::HUD_BLOCKS * hud::BLOCK as u16);
+    for (bank, base) in layout::HUD_BLOCK_BASE.into_iter().enumerate() {
+        hw::fetch(hw, img.hud, base, hud::block::SLOTS * hud::BLOCK as u16);
+        for i in 0..hud::LIVE {
+            hw.poke(layout::HUD_SHOWN + (bank * hud::LIVE + i) as u16, hud::variant::FIRST[i]);
+        }
     }
+    let ptrs = img.hud.wrapping_add(hud::variant::POINTERS as u32 * hud::BLOCK as u32);
+    hw::fetch(hw, ptrs, layout::HUD_TABLE + hud::table::PTRS, (hud::ROWS * 8) as u16);
     // Colors are fixed (the damage flash is on the border); X positions follow the shake in hud_update.
     for (i, &c) in hud::COLORS.iter().enumerate() {
         hw.poke(0xD027 + i as u16, c);
@@ -196,20 +202,24 @@ pub fn hud_init<H: Hw + ?Sized>(hw: &mut H, img: &Image) {
     hw.poke(0xD015, 0xFF);
 }
 
-/// Per-frame HUD update (call in vertical blank): the multiplexer table
-/// (not its row counter, which the IRQ owns), the 8 colors and the dynamic
-/// blocks in both banks.
+/// Per-frame HUD update (call in vertical blank, right after showing VIC bank `bank`'s buffer,
+/// `layout::BUFFERS[bank]`): the multiplexer table's rows (Ys, IRQ lines; not its row counter, which the
+/// IRQ owns) and gauge pointers (the rest is static, from `hud_init`), the 8 X positions, the border, and
+/// that bank's blocks: the live slots whose state changed (a 63-byte DMA of the variant from the HUD
+/// blocks at REU `hud_reu`) and the dynamic ones. The other bank catches up when it is shown next, so
+/// every bank is current whenever it is on screen. The table equals `hud::build(s)`.
 #[inline(never)]
 #[cfg_attr(target_arch = "mos", unsafe(link_section = ".hitext"))]
-pub fn hud_update<H: Hw + ?Sized>(hw: &mut H, s: &hud::State) {
-    let t = hud::build(s);
+pub fn hud_update<H: Hw + ?Sized>(hw: &mut H, s: &hud::State, hud_reu: u32, bank: usize) {
     let base = layout::HUD_TABLE;
+    let dy = (s.shake.1 as u8).wrapping_neg();
     for r in 0..hud::ROWS {
-        hw.poke(base + hud::table::LINES + r as u16, t.lines[r]);
-        hw.poke(base + hud::table::YS + r as u16, t.ys[r]);
-        for c in 0..8 {
-            hw.poke(base + hud::table::PTRS + (r * 8 + c) as u16, t.ptrs[r][c]);
-        }
+        let y = hud::row_y(r).wrapping_add(dy);
+        hw.poke(base + hud::table::YS + r as u16, y);
+        hw.poke(base + hud::table::LINES + r as u16, if r == 0 { hud::TOP_IRQ_LINE } else { y.wrapping_sub(2) });
+    }
+    for k in 0..4u8 {
+        hw.poke(base + hud::table::PTRS + (3 + k as u16) * 8 + 5, hud::gauge(s, k));
     }
     let mut msb = 0u8;
     for (i, &x) in hud::xs(s).iter().enumerate() {
@@ -219,17 +229,26 @@ pub fn hud_update<H: Hw + ?Sized>(hw: &mut H, s: &hud::State) {
         }
     }
     hw.poke(0xD010, msb);
-    hw.poke(0xD020, hud::border(s));
+    let border = hud::border(s);
+    hw.poke(0xD020, border);
+    hw.poke(layout::PAINTER + layout::painter::BORDER, border);
+    let base = layout::HUD_BLOCK_BASE[bank];
+    let shown = layout::HUD_SHOWN + (bank * hud::LIVE) as u16;
+    for (i, &v) in hud::live(s).iter().enumerate() {
+        if hw.peek(shown + i as u16) != v {
+            let at = base + hud::block::LIVE[i] as u16 * hud::BLOCK as u16;
+            hw::fetch(hw, hud_reu.wrapping_add((v as u16 * hud::BLOCK as u16) as u32), at, 63);
+            hw.poke(shown + i as u16, v);
+        }
+    }
     let mut blocks = [[0u8; hud::BLOCK]; hud::block::DYNAMIC_COUNT];
     hud::dynamic_blocks(s, &mut blocks);
-    for bank in layout::HUD_BLOCK_BASE {
-        let mut a = bank + hud::block::DYNAMIC as u16 * hud::BLOCK as u16;
-        for b in &blocks {
-            for (k, &v) in b.iter().enumerate().take(63) {
-                hw.poke(a + k as u16, v);
-            }
-            a += hud::BLOCK as u16;
+    let mut a = base + hud::block::DYNAMIC as u16 * hud::BLOCK as u16;
+    for b in &blocks {
+        for (k, &v) in b.iter().enumerate().take(63) {
+            hw.poke(a + k as u16, v);
         }
+        a += hud::BLOCK as u16;
     }
 }
 
@@ -248,34 +267,34 @@ pub fn sort_by_z(sprites: &mut [Sprite]) {
     }
 }
 
-/// Vertical scroll: panorama line `scroll` is the first visible line.
+/// Vertical scroll: panorama line `scroll` is screen line 0 (raster 55).
 ///
-/// The frame copies cell rows `coarse..coarse+25` into the bitmap. In 24-row
-/// mode with YSCROLL `7 - fine` the VIC shows bitmap lines
-/// `fine..fine+192`, so screen line `y` is bitmap line `y + fine` and
-/// panorama line `scroll + y`.
+/// The frame copies cell rows `coarse..coarse+25` into the bitmap. In 24-row mode with YSCROLL `7 - fine`
+/// the VIC shows bitmap lines `fine..fine+192`, so screen line `y` is bitmap line `y + fine` and panorama
+/// line `scroll + y`. The border painter shows the 24 lines above (bitmap `fine - 24 ..`) and below
+/// (`fine + 192 ..`): band rows -3..=-1 and 25..=27 and the bitmap's own hidden lines.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Scroll {
     pub coarse: u16,
     pub fine: u8,
-    /// `$D016` XSCROLL (0-7 hires px): `layout::XSCROLL_REST` at rest; the camera shake moves it.
-    pub xs: u8,
-    /// Whole 8-px columns the background is shifted right (camera shake beyond XSCROLL's reach); the
-    /// columns that wrap in at the edge are blanked to code 00.
-    pub col: i8,
 }
 
 impl Scroll {
     pub fn new(img: &Image, scroll: u16) -> Scroll {
         let max = (img.bg_rows.max(layout::ROWS) - layout::ROWS) * 8;
         let s = scroll.min(max);
-        Scroll { coarse: s >> 3, fine: (s & 7) as u8, xs: layout::XSCROLL_REST, col: 0 }
+        Scroll { coarse: s >> 3, fine: (s & 7) as u8 }
     }
-    /// `$D016`: multicolor, 38 columns (the border hides the XSCROLL gap), XSCROLL.
+    /// Panorama line of screen line 0.
+    pub fn line(self) -> i16 {
+        (self.coarse * 8) as i16 + self.fine as i16
+    }
+    /// `$D016`: multicolor, 40 columns, XSCROLL 0.
     pub fn d016(self) -> u8 {
-        layout::D016 | (self.xs & 7)
+        layout::D016
     }
-    /// `$D011`: bitmap mode, display on, 24 rows, YSCROLL.
+    /// `$D011`: bitmap mode, display on, 24 rows, YSCROLL `7 - fine`. The badline this puts on a painted
+    /// line (block T's line `17 + YSCROLL`, or block B's first for YSCROLL 7) has its own kernel.
     pub fn d011(self) -> u8 {
         0x30 | (7 - self.fine)
     }
@@ -289,37 +308,125 @@ pub fn background_at<H: Hw + ?Sized>(hw: &mut H, img: &Image, t: u8) -> u32 {
     le24(&e, 0)
 }
 
-/// DMA the visible window of the panorama: 25 contiguous cell rows.
-/// With `scroll.col` the copy starts `8 * col` bytes earlier (one cell column per 8 bytes), so every
-/// cell row moves right by `col` columns; the columns that come from the neighbouring cell row are
-/// blanked (left edge for `col > 0`, right edge for `col < 0`).
-pub fn restore_background<H: Hw + ?Sized>(hw: &mut H, img: &Image, buf: Buffer, scroll: Scroll) {
-    let src = img.background + scroll.coarse as u32 * layout::ROW_STRIDE as u32;
-    let shift = 8 * scroll.col as i32;
-    hw::fetch(hw, src.wrapping_sub(shift as u32), buf.bitmap, layout::BITMAP_BYTES);
-    if shift != 0 {
-        let n = shift.unsigned_abs() as u16;
-        let edge = if shift > 0 { 0 } else { layout::ROW_STRIDE - n };
-        for r in 0..layout::ROWS {
-            hw.fill(buf.bitmap + r * layout::ROW_STRIDE + edge, n, 0);
+/// Cell rows in one period of the looping panorama, and their bytes.
+const PERIOD_ROWS: i16 = (crate::demo::PANO_PERIOD / 8) as i16;
+const PERIOD_BYTES: u32 = PERIOD_ROWS as u32 * layout::ROW_STRIDE as u32;
+
+/// Panorama cell row `j` (320 bytes at REU `src`) into `dst`; void outside the panorama.
+fn panorama_row<H: Hw + ?Sized>(hw: &mut H, img: &Image, j: i16, src: u32, dst: u16) {
+    if j < 0 || j >= img.bg_rows as i16 {
+        hw.fill(dst, layout::ROW_STRIDE, 0);
+        return;
+    }
+    hw::fetch(hw, src, dst, layout::ROW_STRIDE);
+}
+
+/// The background: the bitmap's 25 cell rows from panorama row `coarse` in one chained DMA, and (`bands`:
+/// the border painter is on) the band rows -3..=-1 and 25..=27 (wrapped by the loop's period past either
+/// end, void outside the panorama) into
+/// [`layout::BANDS`].
+#[inline(never)]
+pub fn restore_background<H: Hw + ?Sized>(hw: &mut H, img: &Image, buf: Buffer, scroll: Scroll, bands: bool) {
+    let c = scroll.coarse as u32;
+    // Row addresses by shifts (no 32-bit multiply on the 6502): 320 = 256 + 64.
+    let src = img.background + (c << 8) + (c << 6);
+    hw::fetch(hw, src, buf.bitmap, layout::BITMAP_BYTES);
+    if !bands {
+        return;
+    }
+    let band = layout::BAND_BYTES as u32;
+    let mut j = scroll.coarse as i16 - layout::BAND_ROWS as i16;
+    let mut at = src.wrapping_sub(band);
+    let mut dst = layout::BANDS;
+    let mut r = 0u16;
+    while r < 2 * layout::BAND_ROWS {
+        if r == layout::BAND_ROWS {
+            j += layout::ROWS as i16;
+            at = at.wrapping_add(layout::BITMAP_BYTES as u32);
+        }
+        // The panorama loops: a band row past either end is the row one period over.
+        let (k, a) = if j < 0 {
+            (j + PERIOD_ROWS, at.wrapping_add(PERIOD_BYTES))
+        } else if j >= img.bg_rows as i16 {
+            (j - PERIOD_ROWS, at.wrapping_sub(PERIOD_BYTES))
+        } else {
+            (j, at)
+        };
+        panorama_row(hw, img, k, a, dst);
+        j += 1;
+        at = at.wrapping_add(layout::ROW_STRIDE as u32);
+        dst += layout::ROW_STRIDE;
+        r += 1;
+    }
+}
+
+/// Draw `s` (screen coordinates) into the bitmap (`fine` lines lower) and into each band it reaches. A
+/// sprite crossing a seam is drawn once per part it touches, each clipped to its own rows.
+pub fn draw_canvas<H: Hw + ?Sized>(hw: &mut H, img: &Image, buf: Buffer, scroll: Scroll, s: &Sprite) {
+    let y = s.y + scroll.fine as i16;
+    let h = draw_sprite(hw, img, buf.bitmap, layout::HEIGHT, &Sprite { y, ..*s });
+    let band = 8 * layout::BAND_ROWS as i16;
+    if y < 0 && y + h > -band {
+        draw_sprite(hw, img, layout::BANDS, band, &Sprite { y: y + band, ..*s });
+    }
+    if y + h > layout::HEIGHT && y < layout::HEIGHT + band {
+        draw_sprite(hw, img, layout::BANDS + layout::BAND_BYTES, band, &Sprite { y: y - layout::HEIGHT, ..*s });
+    }
+}
+
+/// One cell row (320 bytes at `src`) line-major at `dst`: line `l`'s 40 bytes (one per cell) at
+/// `dst + 40 l`. The reference for the C64's assembler copy.
+pub fn transpose_row<H: Hw + ?Sized>(hw: &mut H, src: u16, dst: u16) {
+    for l in 0..8u16 {
+        for c in 0..layout::COLS {
+            let v = hw.peek(src + c * 8 + l);
+            hw.poke(dst + l * layout::BAND_LINE + c, v);
         }
     }
 }
 
-/// Render a whole frame into `buf`. Sorts `sprites` in place. Sprites are in
-/// screen coordinates; they are drawn `scroll.fine` lines lower in the bitmap
-/// so the display's YSCROLL leaves them where the scene put them.
-pub fn render_frame<H: Hw + ?Sized>(hw: &mut H, img: &Image, buf: Buffer, scroll: Scroll, sprites: &mut [Sprite]) {
-    restore_background(hw, img, buf, scroll);
-    sort_by_z(sprites);
-    for s in sprites.iter() {
-        let mut s = *s;
-        s.y += scroll.fine as i16;
-        draw_sprite(hw, img, buf, &s);
+/// The painted lines of buffer `buf` to its set in the REU, where the border painter reads them while
+/// `buf` is shown, line-major (the painter's order). Block T's 24 lines are bitmap lines `fine - 24 ..`:
+/// band rows -3..=-1 and bitmap row 0; block B's are `fine + 192 ..`: bitmap row 24 and band rows 25..=27.
+/// Each block's 4 rows are laid out line-major in `SEG_BUF` and its 24 lines stashed from line `fine`.
+#[inline(never)]
+pub fn stash_bands<H: Hw + ?Sized>(hw: &mut H, buf: Buffer, scroll: Scroll) {
+    let from = layout::BAND_LINES_BUF + scroll.fine as u16 * layout::BAND_LINE;
+    let set = layout::band_set(buf);
+    let mut at = set;
+    let mut block = 0u8;
+    while block < 2 {
+        let mut r = 0u16;
+        while r < 4 {
+            let src = if block == 0 {
+                if r < layout::BAND_ROWS { layout::BANDS + r * layout::ROW_STRIDE } else { buf.bitmap }
+            } else if r == 0 {
+                buf.bitmap + (layout::ROWS - 1) * layout::ROW_STRIDE
+            } else {
+                layout::BANDS + layout::BAND_BYTES + (r - 1) * layout::ROW_STRIDE
+            };
+            hw.transpose_row(src, layout::BAND_LINES_BUF + r * layout::ROW_STRIDE);
+            r += 1;
+        }
+        hw::stash(hw, from, at, layout::BLOCK_BYTES);
+        at += layout::BLOCK_BYTES as u32;
+        block += 1;
     }
 }
 
-/// Show `buf` with its fine scroll. Call in vblank.
+/// Render a whole frame into `buf` and its bands. Sorts `sprites` in place. Sprites are in screen
+/// coordinates; they are drawn `scroll.fine` lines lower in the bitmap so the display's YSCROLL leaves
+/// them where the scene put them.
+pub fn render_frame<H: Hw + ?Sized>(hw: &mut H, img: &Image, buf: Buffer, scroll: Scroll, sprites: &mut [Sprite]) {
+    restore_background(hw, img, buf, scroll, true);
+    sort_by_z(sprites);
+    for s in sprites.iter() {
+        draw_canvas(hw, img, buf, scroll, s);
+    }
+    stash_bands(hw, buf, scroll);
+}
+
+/// Show `buf` (its bands are the painter's from the next block T on). Call in vblank.
 pub fn present<H: Hw + ?Sized>(hw: &mut H, buf: Buffer, scroll: Scroll) {
     let dd00 = hw.peek(0xDD00) & 0xFC | buf.dd00;
     hw.poke(0xDD00, dd00);
@@ -342,15 +449,17 @@ pub fn reset_sprite_cache<H: Hw + ?Sized>(hw: &mut H) {
     }
 }
 
-/// Draw one sprite at bitmap coordinates (`y` is a bitmap line).
+/// Draw one sprite into the cell rows at `bitmap` (320 bytes apart), lines `0..height` (`y` is a line
+/// of them). Returns the sprite's height (0 for no such frame), drawn or not, so the caller knows which
+/// other rows it reaches.
 ///
 /// Small one-band sprites are drawn from the RAM cache (fetched once). Others: the frame record, then
 /// for each band with visible lines its column offsets and, one `CHUNK` at a time, the on-screen
 /// columns' records; the CPU kernel ([`Hw::draw_cols`]) scatters them into the bitmap.
 #[inline(never)]
-pub fn draw_sprite<H: Hw + ?Sized>(hw: &mut H, img: &Image, buf: Buffer, s: &Sprite) {
+pub fn draw_sprite<H: Hw + ?Sized>(hw: &mut H, img: &Image, bitmap: u16, height: i16, s: &Sprite) -> i16 {
     if s.frame >= img.frames {
-        return;
+        return 0;
     }
     let xp = (s.x & 3) as u16;
     let slot = layout::SPRITE_CACHE
@@ -384,19 +493,19 @@ pub fn draw_sprite<H: Hw + ?Sized>(hw: &mut H, img: &Image, buf: Buffer, s: &Spr
     let j0 = if base < 0 { -base } else { 0 };
     let j1 = wb.min(layout::COLS as i16 - base);
     if j0 >= j1 {
-        return;
+        return h;
     }
-    // Vertical clip: sprite lines [top, bot) are on screen.
+    // Vertical clip: sprite lines [top, bot) are on the target's lines.
     let top = if s.y < 0 { -s.y } else { 0 };
-    let bot = h.min(layout::HEIGHT - s.y);
+    let bot = h.min(height - s.y);
     if top >= bot {
-        return;
+        return h;
     }
     hw.mark(0);
     poke16(hw, layout::JOB + job::Y, s.y as u16);
     poke16(hw, layout::JOB + job::TOP, top as u16);
     poke16(hw, layout::JOB + job::BOT, bot as u16);
-    let dst = buf.bitmap.wrapping_add(((base + j0) as u16) << 3);
+    let dst = bitmap.wrapping_add(((base + j0) as u16) << 3);
     let ncols = (j1 - j0) as u16;
 
     if block_ram != 0 {
@@ -409,7 +518,7 @@ pub fn draw_sprite<H: Hw + ?Sized>(hw: &mut H, img: &Image, buf: Buffer, s: &Spr
         hw.mark(1);
         hw.draw_cols();
         hw.mark(2);
-        return;
+        return h;
     }
 
     // The visible bands' starts, then per band its on-screen column offsets and records.
@@ -439,6 +548,7 @@ pub fn draw_sprite<H: Hw + ?Sized>(hw: &mut H, img: &Image, buf: Buffer, s: &Spr
             j = k;
         }
     }
+    h
 }
 
 /// Reference sprite kernel (the C64 build uses `asm/blit.S`): draw `NCOLS` consecutive column records

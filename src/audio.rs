@@ -385,10 +385,13 @@ pub fn service<H: Hw + ?Sized>(hw: &mut H, p: &mut Player, light: bool) {
     // Samples played = ticks × CLOCK_SAMPLES / p.ticks, by subtraction (~267 a frame): a 32-bit
     // divide (and LLVM turns quotient-and-remainder into a 2.4 KB divmod) costs more 6502 code.
     let mut x = elapsed * CLOCK_SAMPLES + p.frac;
+    // Samples since the last service: a few hundred, so 16 bits (32-bit counting cost the AUDIO phase room).
+    let mut since = 0u16;
     while x >= p.ticks {
         x -= p.ticks;
-        p.played += 1;
+        since += 1;
     }
+    p.played += since as u32;
     p.frac = x;
     if p.played >= p.produced {
         // The sampler caught up (a stall): skip ahead rather than play stale ring data again.
@@ -397,8 +400,17 @@ pub fn service<H: Hw + ?Sized>(hw: &mut H, p: &mut Player, light: bool) {
     }
     let target = p.played + RING_SAMPLES - GUARD;
     let lead = p.produced - p.played;
-    let budget = if light || lead < SAFE_LEAD { BUDGET } else { HEAVY_BUDGET };
-    let mut want = target.saturating_sub(p.produced).min(budget) as u16;
+    // A short lead decodes what was played since the last service and half again, so the ring recovers
+    // at any frame rate (BUDGET alone is ~1.5 frames at 60 fps: at 30 fps the ring ran dry).
+    let short = lead < SAFE_LEAD;
+    let mut budget = if light || short { BUDGET as u16 } else { HEAVY_BUDGET as u16 };
+    // Capped at two light budgets (30 fps's need): a long stall must not turn into a long decode inside a
+    // frame that is already late; the next frames make up the rest.
+    let need = (since + (since >> 1)).min(2 * BUDGET as u16);
+    if short && need > budget {
+        budget = need;
+    }
+    let mut want = target.saturating_sub(p.produced).min(budget as u32) as u16;
     while want != 0 && p.state == RUNNING {
         let n = want.min(512);
         produce(hw, p, n);
@@ -804,5 +816,29 @@ mod tests {
         assert_eq!(p.underruns, 0);
         assert!(lead_min > SAFE_LEAD / 2, "lead {lead_min}");
         println!("audio: ticks {} lead min {lead_min} produced {}", p.ticks, p.produced);
+    }
+
+    /// A game that drops to 30 fps, every frame heavy (the border painter's first C64U run): the
+    /// short-lead budget follows what was played, so the ring never runs dry.
+    #[test]
+    fn the_ring_survives_30_fps() {
+        let Some(a) = asset() else { return };
+        let mut r = rig(&a, 0x10_0000);
+        let mut p = Player::new();
+        tune::calibrate(&mut r, &mut p);
+        tune::load(&mut r, &mut p, 0x10_0000);
+        prime(&mut r, &mut p);
+        tune::arm(&mut r);
+        gate(&mut r);
+        tune::started(&mut r, &mut p);
+        let mut lead_min = u32::MAX;
+        for _ in 0..4000u32 {
+            r.t += 2 * 17_045;
+            service(&mut r, &mut p, false);
+            lead_min = lead_min.min(p.produced - p.played);
+            assert!(p.produced - p.played <= RING_SAMPLES - GUARD + 1, "overran the right voice");
+        }
+        assert_eq!(p.underruns, 0, "lead min {lead_min}");
+        assert!(lead_min > SAFE_LEAD / 2, "lead {lead_min}");
     }
 }

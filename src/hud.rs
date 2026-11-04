@@ -45,39 +45,79 @@ pub const FLASH_STEP: u8 = 2;
 pub const FLASH_FRAMES: u8 = FLASH_RAMP.len() as u8 * FLASH_STEP;
 
 pub const BLOCK: usize = 64;
+/// Blocks in the REU: the [`block::SLOTS`] RAM slots' boot contents, then the live readouts' variants.
 pub const BLOCKS: usize = crate::format::HUD_BLOCKS as usize;
 
-/// Block ids. Static blocks are baked by the host; readouts with few states
-/// (lives, gauge, speed) are pre-drawn variants chosen by pointer; only the
-/// score and stage digits are written at runtime.
+/// Block ids = the RAM slots in each VIC bank (sprite pointers). Static blocks are baked by the host. A
+/// readout with few states (tapes, ladders, lives, speed) has ONE live slot, refreshed from its pre-drawn
+/// variant in the REU when the state changes (`render::hud_update`); only the score and stage digits are
+/// drawn at runtime. (48 slots per bank became 22: the freed RAM holds the border painter.)
 pub mod block {
     pub const BLANK: u8 = 0;
     pub const BRACKET_TL: u8 = 1;
     pub const BRACKET_BL: u8 = 2;
     pub const BRACKET_TR: u8 = 3;
     pub const BRACKET_BR: u8 = 4;
-    /// Four scroll phases each.
+    /// Live: four scroll phases each.
     pub const TAPE_L: u8 = 5;
-    pub const TAPE_R: u8 = 9;
-    /// Five tilts each (bank -2..=2).
-    pub const LADDER_L: u8 = 13;
-    pub const LADDER_R: u8 = 18;
-    pub const LABEL_PTS: u8 = 23;
-    pub const LABEL_LIFE: u8 = 24;
-    pub const LABEL_ARM: u8 = 25;
-    pub const LABEL_SPD: u8 = 26;
-    pub const LABEL_STG: u8 = 27;
-    /// 0..=3 lives.
-    pub const LIVES: u8 = 28;
-    /// A pair of gauge slots: neither, upper or lower highlighted.
-    pub const GAUGE: u8 = 32;
-    /// Speed levels 0..=5.
-    pub const SPEED: u8 = 35;
+    pub const TAPE_R: u8 = 6;
+    /// Live: five tilts each (bank -2..=2).
+    pub const LADDER_L: u8 = 7;
+    pub const LADDER_R: u8 = 8;
+    pub const LABEL_PTS: u8 = 9;
+    pub const LABEL_LIFE: u8 = 10;
+    pub const LABEL_ARM: u8 = 11;
+    pub const LABEL_SPD: u8 = 12;
+    pub const LABEL_STG: u8 = 13;
+    /// Live: 0..=3 lives.
+    pub const LIVES: u8 = 14;
+    /// A pair of gauge slots: neither, upper or lower highlighted (several rows show them at once).
+    pub const GAUGE: u8 = 15;
+    /// Live: speed levels 0..=5.
+    pub const SPEED: u8 = 18;
     /// Runtime-written blocks: the score (2 sprites, 3 digits each), the stage digit.
-    pub const SCORE: u8 = 41;
-    pub const STAGE: u8 = 43;
-    pub const DYNAMIC: u8 = 41;
+    pub const SCORE: u8 = 19;
+    pub const STAGE: u8 = 21;
+    pub const DYNAMIC: u8 = 19;
     pub const DYNAMIC_COUNT: usize = 3;
+    /// RAM slots per bank.
+    pub const SLOTS: u16 = 22;
+    /// The live slots, in [`super::live`]'s order.
+    pub const LIVE: [u8; super::LIVE] = [TAPE_L, TAPE_R, LADDER_L, LADDER_R, LIVES, SPEED];
+}
+
+/// REU block ids of the live readouts' variants (after the slots).
+pub mod variant {
+    pub const TAPE_L: u8 = 22;
+    pub const TAPE_R: u8 = 26;
+    pub const LADDER_L: u8 = 30;
+    pub const LADDER_R: u8 = 35;
+    pub const LIVES: u8 = 40;
+    pub const SPEED: u8 = 44;
+    /// Not a sprite: the multiplexer's 64 pointers for the default state (`build(&State::default())`),
+    /// fetched into the table at boot (`render::hud_init`); only the gauge's change after that.
+    pub const POINTERS: u8 = 50;
+    pub const END: u8 = 51;
+    /// Each live slot's variant 0 (its boot contents).
+    pub const FIRST: [u8; super::LIVE] = [TAPE_L, TAPE_R, LADDER_L, LADDER_R, LIVES, SPEED];
+}
+
+/// Live readouts.
+pub const LIVE: usize = 6;
+
+/// The REU variant each live slot ([`block::LIVE`]) should show.
+#[inline(never)]
+#[cfg_attr(target_arch = "mos", unsafe(link_section = ".vtext"))]
+pub fn live(s: &State) -> [u8; LIVE] {
+    let tilt = (s.bank.clamp(-4, 4) + 4) as u8 / 2; // 0..=4
+    [
+        variant::TAPE_L + ((s.tape_l / 3) % 4) as u8,
+        variant::TAPE_R + ((s.tape_r / 3) % 4) as u8,
+        variant::LADDER_L + tilt,
+        variant::LADDER_R + tilt,
+        variant::LIVES + s.lives.min(3),
+        variant::SPEED + s.speed.min(5),
+    ]
 }
 
 /// What the HUD shows this frame.
@@ -128,19 +168,23 @@ pub const fn row_y(r: usize) -> u8 {
     FIRST_Y + r as u8 * ROW_PITCH
 }
 
+/// The gauge's block on row `3 + k`: slots 2k (upper) and 2k+1 (lower) of the 8-slot gauge. The only
+/// pointers that change at runtime (everything else is a live slot or static: [`variant::POINTERS`]).
+#[inline(always)]
+pub fn gauge(s: &State, k: u8) -> u8 {
+    block::GAUGE + if s.gauge == 2 * k { 1 } else if s.gauge == 2 * k + 1 { 2 } else { 0 }
+}
+
 /// Which block each channel shows on each row.
 pub fn build(s: &State) -> Table {
     use block::*;
     let mut ptrs = [[BLANK; 8]; ROWS];
-    let tl = TAPE_L + ((s.tape_l / 3) % 4) as u8;
-    let tr = TAPE_R + ((s.tape_r / 3) % 4) as u8;
-    let tilt = (s.bank.clamp(-4, 4) + 4) as u8 / 2; // 0..=4
     for (r, row) in ptrs.iter_mut().enumerate() {
-        row[0] = tl;
-        row[7] = tr;
+        row[0] = TAPE_L;
+        row[7] = TAPE_R;
         if r == 3 || r == 4 {
-            row[3] = LADDER_L + tilt;
-            row[4] = LADDER_R + tilt;
+            row[3] = LADDER_L;
+            row[4] = LADDER_R;
         }
     }
     ptrs[0][3] = BRACKET_TL;
@@ -151,13 +195,12 @@ pub fn build(s: &State) -> Table {
     ptrs[1][1] = SCORE;
     ptrs[1][2] = SCORE + 1;
     ptrs[6][1] = LABEL_SPD;
-    ptrs[7][1] = SPEED + s.speed.min(5);
+    ptrs[7][1] = SPEED;
     ptrs[0][5] = LABEL_LIFE;
-    ptrs[1][5] = LIVES + s.lives.min(3);
+    ptrs[1][5] = LIVES;
     ptrs[2][5] = LABEL_ARM;
     for k in 0..4u8 {
-        // Slots 2k (upper) and 2k+1 (lower) of the 8-slot gauge.
-        ptrs[3 + k as usize][5] = GAUGE + if s.gauge == 2 * k { 1 } else if s.gauge == 2 * k + 1 { 2 } else { 0 };
+        ptrs[3 + k as usize][5] = gauge(s, k);
     }
     ptrs[7][5] = LABEL_STG;
     ptrs[7][6] = STAGE;
@@ -314,8 +357,8 @@ pub fn dynamic_blocks(s: &State, out: &mut [[u8; BLOCK]; block::DYNAMIC_COUNT]) 
     put_digit(&mut out[2], 0, 7, (s.stage % 10) as usize);
 }
 
-/// The static blocks (host bakes them into the REU; the C64 copies them into
-/// both VIC banks at boot). Dynamic slots are left blank.
+/// The static blocks (host bakes them into the REU; the C64 copies the first [`block::SLOTS`] into both
+/// VIC banks at boot, the variants stay in the REU). Dynamic slots are left blank.
 pub fn static_blocks() -> [[u8; BLOCK]; BLOCKS] {
     use block::*;
     let mut b = [[0u8; BLOCK]; BLOCKS];
@@ -357,20 +400,20 @@ pub fn static_blocks() -> [[u8; BLOCK]; BLOCKS] {
                 hline(&mut r, 15, 20, y);
             }
         }
-        b[(TAPE_L + p) as usize] = l;
-        b[(TAPE_R + p) as usize] = r;
+        b[(variant::TAPE_L + p) as usize] = l;
+        b[(variant::TAPE_R + p) as usize] = r;
     }
     // Pitch ladder: a dashed horizon bar with an end tick, tilted with the bank.
     for t in 0..5i32 {
         let slope = t - 2; // -2..=2 pixels per 12 across
-        let l = &mut b[(LADDER_L + t as u8) as usize];
+        let l = &mut b[(variant::LADDER_L + t as u8) as usize];
         for x in 4..22 {
             if (x / 3) % 2 == 0 {
                 set(l, x, 10 + slope * (x - 13) / 6);
             }
         }
         vline(l, 4, 10 - slope * 9 / 6, 13 - slope * 9 / 6);
-        let r = &mut b[(LADDER_R + t as u8) as usize];
+        let r = &mut b[(variant::LADDER_R + t as u8) as usize];
         for x in 2..20 {
             if (x / 3) % 2 == 0 {
                 set(r, x, 10 - slope * (x - 11) / 6);
@@ -385,7 +428,7 @@ pub fn static_blocks() -> [[u8; BLOCK]; BLOCKS] {
     text(&mut b[LABEL_STG as usize], 0, 7, b"STG");
     // Lives 0..=3: small arrowheads 8 pixels apart.
     for n in 0..4u8 {
-        let k = &mut b[(LIVES + n) as usize];
+        let k = &mut b[(variant::LIVES + n) as usize];
         for i in 0..n as i32 {
             let c = 5 + i * 8;
             for r in 0..6 {
@@ -401,7 +444,7 @@ pub fn static_blocks() -> [[u8; BLOCK]; BLOCKS] {
     }
     // Speed 0..=5: six segments, lit up to the level.
     for lvl in 0..6i32 {
-        let k = &mut b[(SPEED + lvl as u8) as usize];
+        let k = &mut b[(variant::SPEED + lvl as u8) as usize];
         for seg in 0..6 {
             rect(k, seg * 4, 8, seg * 4 + 2, 14, seg <= lvl);
         }
@@ -409,6 +452,14 @@ pub fn static_blocks() -> [[u8; BLOCK]; BLOCKS] {
     // Underline the labels (a helmet-display touch).
     for id in [LABEL_PTS, LABEL_LIFE, LABEL_ARM, LABEL_SPD] {
         hline(&mut b[id as usize], 0, 22, 20);
+    }
+    // The live slots boot showing their first variant.
+    for i in 0..crate::hud::LIVE {
+        b[block::LIVE[i] as usize] = b[variant::FIRST[i] as usize];
+    }
+    let t = build(&State::default());
+    for (i, &p) in t.ptrs.iter().flatten().enumerate() {
+        b[variant::POINTERS as usize][i] = p;
     }
     b
 }
@@ -427,7 +478,7 @@ mod tests {
             assert_eq!(t.lines[r], t.ys[r - 1] + 22);
             assert_eq!(t.lines[r], t.ys[r] - 2);
         }
-        assert!(t.ptrs.iter().flatten().all(|&p| (p as usize) < BLOCKS));
+        assert!(t.ptrs.iter().flatten().all(|&p| (p as u16) < block::SLOTS));
     }
 
     #[test]
@@ -460,10 +511,30 @@ mod tests {
         assert!(get(&out[0], 2, 8));
         // "4" starts the second sprite: its diagonal top at x = 3.
         assert!(get(&out[1], 3, 7));
-        let t = build(&State { lives: 2, gauge: 5, speed: 3, ..State::default() });
-        assert_eq!(t.ptrs[1][5], block::LIVES + 2);
+        let s = State { lives: 2, gauge: 5, speed: 3, ..State::default() };
+        let t = build(&s);
+        assert_eq!(t.ptrs[1][5], block::LIVES);
         assert_eq!(t.ptrs[5][5], block::GAUGE + 2); // slot 5 = row 3+2, lower
         assert_eq!(t.ptrs[3][5], block::GAUGE);
-        assert_eq!(t.ptrs[7][1], block::SPEED + 3);
+        assert_eq!(t.ptrs[7][1], block::SPEED);
+        assert_eq!(live(&s)[4], variant::LIVES + 2);
+        assert_eq!(live(&s)[5], variant::SPEED + 3);
+    }
+
+    #[test]
+    fn live_slots_boot_on_their_first_variant_and_variants_fit() {
+        let b = static_blocks();
+        assert_eq!(variant::END as usize, BLOCKS);
+        assert_eq!(variant::TAPE_L as u16, block::SLOTS);
+        for i in 0..super::LIVE {
+            assert_eq!(b[block::LIVE[i] as usize], b[variant::FIRST[i] as usize]);
+        }
+        // Every state picks a variant of its own readout.
+        let ends = [variant::TAPE_R, variant::LADDER_L, variant::LADDER_R, variant::LIVES, variant::SPEED, variant::END];
+        for s in [State { tape_l: 11, tape_r: 7, bank: 4, lives: 9, speed: 9, ..State::default() }, State { bank: -4, ..State::default() }] {
+            for (i, v) in live(&s).iter().enumerate() {
+                assert!((variant::FIRST[i]..ends[i]).contains(v));
+            }
+        }
     }
 }

@@ -32,6 +32,34 @@ pub trait Hw {
     fn draw_cols(&mut self) {
         crate::render::draw_cols(self)
     }
+    /// One REU command: `len` bytes between C64 `c64` and REU `addr` (every register written, then the
+    /// command). The C64 does it with interrupts masked (its `transfer`, `asm/reu.S` `reu_transfer`): the border painter's IRQ
+    /// uses the REU too, and the REU's registers do not reliably read back for a save and restore.
+    fn dma(&mut self, command: u8, c64: u16, addr: u32, len: u16) {
+        set_reu_addr(self, addr);
+        poke16(self, reu::C64_LO, c64);
+        poke16(self, reu::LEN_LO, len);
+        self.reu_exec(command);
+    }
+    /// One 320-byte cell row at `src` laid out line-major at `dst` (`render::transpose_row`).
+    /// `len` bytes between C64 `c64` and REU `addr` (`command`), as DMAs of at most [`MAX_DMA`] bytes split
+    /// at 512 KiB banks. The C64 does it in `asm/reu.S` `reu_transfer`.
+    fn transfer(&mut self, command: u8, mut c64: u16, mut addr: u32, mut len: u16) {
+        while len != 0 {
+            let to_bank = REU_BANK - (addr & (REU_BANK - 1));
+            let mut n = len.min(MAX_DMA);
+            if (n as u32) > to_bank {
+                n = to_bank as u16;
+            }
+            self.dma(command, c64, addr, n);
+            c64 = c64.wrapping_add(n);
+            addr += n as u32;
+            len -= n;
+        }
+    }
+    fn transpose_row(&mut self, src: u16, dst: u16) {
+        crate::render::transpose_row(self, src, dst)
+    }
     /// Store `value` into `len` bytes of RAM at `addr`.
     fn fill(&mut self, addr: u16, len: u16, value: u8) {
         for i in 0..len {
@@ -73,21 +101,8 @@ pub fn init<H: Hw + ?Sized>(hw: &mut H) {
     hw.poke(reu::CONTROL, 0);
 }
 
-fn transfer<H: Hw + ?Sized>(hw: &mut H, command: u8, mut c64: u16, mut addr: u32, mut len: u16) {
-    while len != 0 {
-        let to_bank = REU_BANK - (addr & (REU_BANK - 1));
-        let mut n = len.min(MAX_DMA);
-        if (n as u32) > to_bank {
-            n = to_bank as u16;
-        }
-        set_reu_addr(hw, addr);
-        poke16(hw, reu::C64_LO, c64);
-        poke16(hw, reu::LEN_LO, n);
-        hw.reu_exec(command);
-        c64 = c64.wrapping_add(n);
-        addr += n as u32;
-        len -= n;
-    }
+fn transfer<H: Hw + ?Sized>(hw: &mut H, command: u8, c64: u16, addr: u32, len: u16) {
+    hw.transfer(command, c64, addr, len);
 }
 
 /// REU → C64, split at 512 KiB banks and [`MAX_DMA`].

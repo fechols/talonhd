@@ -67,6 +67,12 @@ fn compare(m: &Machine, buf: Buffer, want: &Expected, what: &str) {
     if let Some(i) = (0..codes.len()).find(|&i| codes[i] != want.codes[i]) {
         panic!("{what}: pixel ({}, {}) code {} want {}", i % 160, i / 160, codes[i], want.codes[i]);
     }
+    let (top, bottom) = m.band_codes(buf);
+    for (band, got, want) in [("top", &top, &want.top), ("bottom", &bottom, &want.bottom)] {
+        if let Some(i) = (0..got.len()).find(|&i| got[i] != want[i]) {
+            panic!("{what}: {band} band pixel ({}, {}) code {} want {}", i % 160, i / 160, got[i], want[i]);
+        }
+    }
     for i in 0..1000 {
         assert_eq!(m.ram[buf.screen as usize + i], want.screen[i], "{what}: screen cell {i}");
         assert_eq!(m.color_ram[i] & 15, want.color[i], "{what}: color cell {i}");
@@ -84,7 +90,7 @@ fn run(m: &mut Machine, pano: &Panorama, frames: &[SpriteImage], buf: Buffer, sc
     render::render_frame(m, &img, buf, scroll, &mut list);
     render::present(m, buf, scroll);
     assert_eq!(m.dd00 & 3, buf.dd00);
-    assert_eq!(m.d011 & 7, 7 - scroll.fine);
+    assert_eq!(m.d011, 0x30 | (7 - scroll.fine));
     let want = reference::compose(pano, frames, scroll, sprites);
     compare(m, buf, &want, what);
 }
@@ -123,9 +129,9 @@ fn randomized_scenes() {
                 let (w, h) = (frames[frame as usize].w as i32, frames[frame as usize].h as i32);
                 Sprite {
                     frame,
-                    // Mostly near or overlapping the screen; sometimes far off.
+                    // Mostly near or overlapping the canvas (screen lines -24..216); sometimes far off.
                     x: rng.range(-w - 8, 168) as i16,
-                    y: rng.range(-h - 8, 208) as i16,
+                    y: rng.range(-h - 32, 224) as i16,
                     z: rng.range(0, 3) as i16,
                 }
             })
@@ -147,7 +153,8 @@ fn clipping_edges_every_phase() {
     for frame in 0..3u16 {
         let (w, h) = (frames[frame as usize].w as i16, frames[frame as usize].h as i16);
         for x in (-w - 1..=4).chain(150..=161) {
-            for y in [-h - 8, -h - 1, -h, -h + 1, -7, -1, 0, 1, 7, 8, 96, 191, 192, 195, 199, 200] {
+            // Screen lines; the canvas seams are at -24 (block T), 0 (window), 192 (block B) and 216.
+            for y in [-h - 25, -h - 24, -h - 23, -h - 8, -h - 1, -h, -h + 1, -25, -24, -23, -7, -1, 0, 1, 7, 8, 96, 191, 192, 193, 199, 200, 215, 216, 217] {
                 for scroll in [0u16, 3, 7, 13] {
                     let s = [Sprite { frame, x, y, z: 0 }];
                     run(&mut m, &pano, &frames, BUFFERS[0], scroll, &s, &format!("frame {frame} x {x} y {y} scroll {scroll}"));
@@ -185,6 +192,36 @@ fn scrolling_fine_and_coarse() {
     for scroll in 0..=(40 - 25) * 8 + 5 {
         let s = [Sprite { frame: 0, x: 3 - scroll as i16 / 3, y: -40 + scroll as i16 / 2, z: 0 }];
         run(&mut m, &pano, &frames, BUFFERS[scroll as usize & 1], scroll, &s, &format!("scroll {scroll}"));
+    }
+}
+
+/// A looping panorama (one `PANO_PERIOD` and its first 25 rows again, as the stages bake it): at either
+/// end of the scroll the band rows past the panorama are the rows one period over, not void.
+#[test]
+fn the_bands_wrap_at_the_panoramas_seam() {
+    let mut rng = Rng(5200);
+    let period = talonhd::demo::PANO_PERIOD as usize;
+    let mut pano = panorama(&mut rng, (period / 8) as u16);
+    let wrap = pano.codes[..160 * 200].to_vec();
+    pano.codes.extend_from_slice(&wrap);
+    pano.rows += 25;
+    let frames = vec![sprite(&mut rng, 32, 32)];
+    let image = bake::build_image(&pano, &frames, 0).unwrap();
+    let mut m = Machine::new(&image);
+    let line = |p: usize| &pano.codes[p * 160..(p + 1) * 160];
+    for scroll in (0..24).chain(period as u16 - 24..=period as u16) {
+        let s = [Sprite { frame: 0, x: 60, y: -20, z: 0 }];
+        let buf = BUFFERS[scroll as usize & 1];
+        run(&mut m, &pano, &frames, buf, scroll, &s, &format!("seam scroll {scroll}"));
+        // Independently of the reference: the bands' lines are the looped panorama's.
+        let want = reference::compose(&pano, &frames, Scroll::new(&render::read_image(&mut m).unwrap(), scroll), &[]);
+        let (fine, p0) = ((scroll & 7) as usize, (scroll & !7) as usize);
+        for t in 0..24 {
+            let top = (p0 + period + fine + t - 24) % period;
+            assert_eq!(&want.top[t * 160..(t + 1) * 160], line(top), "seam scroll {scroll}: top line {t}");
+            let bottom = (p0 + fine + 192 + t) % period;
+            assert_eq!(&want.bottom[t * 160..(t + 1) * 160], line(bottom), "seam scroll {scroll}: bottom line {t}");
+        }
     }
 }
 
@@ -257,5 +294,48 @@ fn animated_levels_pick_a_frame_by_tick() {
         // Each frame is held for 4 ticks, and the loop repeats.
         assert_eq!(render::background_at(&mut m, &img, 4 * k as u8 + 3), a);
         assert_eq!(render::background_at(&mut m, &img, 4 * k as u8 + 16), a);
+    }
+}
+
+/// The live HUD: after boot, every frame's `hud_update` leaves `hud::build(s)` in the multiplexer's
+/// table and the shown bank's live slots holding their state's variants, whatever changed since that
+/// bank was last shown (it is refreshed only when shown, every other frame).
+#[test]
+fn the_hud_table_and_live_slots_follow_the_state() {
+    use talonhd::{hud, layout};
+    let mut rng = Rng(0x0BAD_5EED);
+    let pano = panorama(&mut rng, 30);
+    let image = bake::build_image(&pano, &[sprite(&mut rng, 8, 8)], 0).unwrap();
+    let mut m = Machine::new(&image);
+    let img = render::read_image(&mut m).expect("header");
+    render::hud_init(&mut m, &img);
+    let blocks = hud::static_blocks();
+    for t in 0..64u32 {
+        let s = hud::State {
+            score: t * 977,
+            lives: (t % 5) as u8,
+            gauge: (t % 9) as u8,
+            speed: (t / 3 % 7) as u8,
+            bank: (t % 9) as i8 - 4,
+            tape_l: (t * 5) as u16,
+            tape_r: (t * 7) as u16,
+            shake: ((t % 5) as i8 - 2, (t % 7) as i8 - 3),
+            ..hud::State::default()
+        };
+        let bank = (t & 1) as usize;
+        render::hud_update(&mut m, &s, img.hud, bank);
+        let want = hud::build(&s);
+        let table = layout::HUD_TABLE as usize;
+        for r in 0..hud::ROWS {
+            assert_eq!(m.ram[table + hud::table::LINES as usize + r], want.lines[r], "t {t} row {r} line");
+            assert_eq!(m.ram[table + hud::table::YS as usize + r], want.ys[r], "t {t} row {r} y");
+            for c in 0..8 {
+                assert_eq!(m.ram[table + hud::table::PTRS as usize + r * 8 + c], want.ptrs[r][c], "t {t} row {r} ch {c}");
+            }
+        }
+        for (i, &v) in hud::live(&s).iter().enumerate() {
+            let at = layout::HUD_BLOCK_BASE[bank] as usize + hud::block::LIVE[i] as usize * hud::BLOCK;
+            assert_eq!(m.ram[at..at + 63], blocks[v as usize][..63], "t {t} live slot {i}");
+        }
     }
 }

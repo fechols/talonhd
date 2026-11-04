@@ -23,6 +23,16 @@ MEMORY {
      *   (the game step; the HUD IRQ banks I/O in for itself). */
     upram (rwx) : ORIGIN = 0x5C00, LENGTH = 0x0400
     ioram (rwx) : ORIGIN = 0xD000, LENGTH = 0x1000
+    /* - $5600-$57FF, bank 1's HUD space after the 22 sprite slots ($5000-$557F; the readouts' variants
+     *   stay in the REU since they became live slots). Copied last: it overlaps only .hitext's image. */
+    vram (rwx) : ORIGIN = 0x5600, LENGTH = 0x0200
+    /* - $8600-$86FF, bank 2's HUD space: the border painter's timing-critical code (asm/border.S .ptext).
+     *   One page, so nothing in it can cross a page (a crossing costs a cycle and moves every store).
+     *   Copied after .vtext: it overlaps only .iotext's image. $8700-$8AFF are its decode tables and
+     *   $5800-$5BFF its staging (no sections: fixed addresses, filled at run time). */
+    ptram (rwx) : ORIGIN = 0x8600, LENGTH = 0x0100
+    /* - $8B00-$8BFF: the painter's IRQ side (asm/border.S .p2text: blocks, refill, flip). */
+    p2ram (rwx) : ORIGIN = 0x8B00, LENGTH = 0x0100
     /* llvm-mos's static stack (`.noinit`: the fixed frames of non-recursive functions), moved out of
      * main RAM: after the HUD table ($CB00-$CB50), below the soft stack, which grows down from $D000 and
      * measured 325 bytes deep (tools/emu64.py reports its high-water mark). Never loaded: the PRG's load
@@ -49,6 +59,9 @@ MEMORY {
     ph_s2gnd (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
     ph_s2air (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
     ph_astro (rwx) : ORIGIN = 0x9000, LENGTH = 0x1000
+    /* The canvas's background and bands (render::restore_background, draw_canvas, stash_bands): code in
+     * the window's first half; the bands are composed in its second ($9800-$9F7F, layout::BANDS). */
+    ph_bands (rwx) : ORIGIN = 0x9000, LENGTH = 0x0800
     /* Load addresses of every phase but BOOT: outside the PRG (OUTPUT_FORMAT writes ram and hiload
      * only). scripts/build-target.sh extracts them to dist/phases/<name>.bin; bake puts them in the
      * level REU image, and boot copies them to the phase bank (main.rs install_phases). */
@@ -72,6 +85,13 @@ SECTIONS {
         *(.text._ZN7talonhd4game4Game5reset* .text._ZN7talonhd4game4Game8reset_at*)
         *(.text._ZN7talonhd6render8hud_init* .text._ZN7talonhd6render10read_image* .text._ZN7talonhd6render12verify_image* .text._ZN7talonhd6render16invalidate_image*)
     } >ph_boot AT>hiload
+    /* Before .lowtext, which takes the rest of render::*. */
+    .phase.bands : {
+        *(.text.transpose_row_asm)
+        *(.text._ZN7talonhd6render18restore_background* .text._ZN7talonhd6render12panorama_row* .text._ZN7talonhd6render11stash_bands*)
+        *(.text._ZN11talonhd_c6411draw_canvas* .text._ZN11talonhd_c644blit*)
+        *(.text.*Hw$GT$13transpose_row*)
+    } >ph_bands AT>phimg
     .lowtext : {
         *(.text._ZN7talonhd6render*)
         *(.text._ZN11talonhd_c6410read_input*)
@@ -96,6 +116,17 @@ SECTIONS {
         *(.text._ZN7talonhd3sim7collide*)
         *(.text._ZN7talonhd3sim5gauge*)
     } >ioram AT>hiload
+    .ptext : {
+        *(.ptext) *(.ptext.*)
+    } >ptram AT>hiload
+    .p2text : {
+        *(.p2text)
+    } >p2ram AT>hiload
+    .vtext : {
+        *(.vtext .vtext.*)
+        *(.text._ZN7talonhd3hud4live*)
+        *(.text._ZN11talonhd_c6411level_image*)
+    } >vram AT>hiload
     .phase.boss : {
         *(.text._ZN7talonhd4boss*)
         *(.rodata._ZN7talonhd4boss*)
@@ -170,6 +201,15 @@ __uptext_pages = (SIZEOF(.uptext) + 255) / 256;
 __iotext_start = ADDR(.iotext);
 __iotext_load_start = LOADADDR(.iotext);
 __iotext_pages = (SIZEOF(.iotext) + 255) / 256;
+__vtext_start = ADDR(.vtext);
+__vtext_load_start = LOADADDR(.vtext);
+__vtext_pages = (SIZEOF(.vtext) + 255) / 256;
+__ptext_start = ADDR(.ptext);
+__ptext_load_start = LOADADDR(.ptext);
+__ptext_pages = (SIZEOF(.ptext) + 255) / 256;
+__p2text_start = ADDR(.p2text);
+__p2text_load_start = LOADADDR(.p2text);
+__p2text_pages = (SIZEOF(.p2text) + 255) / 256;
 /* Boot copies .uptext ($5C00-$5FFF) before main stashes the BOOT phase from its load image: that image
  * must lie above $6000 or the copy overwrites it (a build with little .iotext would move it down). */
 ASSERT(__phase_boot_load_start >= 0x6000, "BOOT phase load image under the .uptext copy: move it up")
