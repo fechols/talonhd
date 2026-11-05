@@ -72,20 +72,16 @@ pub fn build_image(pano: &Panorama, frames: &[SpriteImage], border: u8) -> Resul
     build_level(pano, frames, border, &[], &[])
 }
 
-/// The level an image built by [`build_animated_level`] holds (`format::header::LEVEL`).
-pub fn set_level(image: &mut [u8], level: u8) {
-    image[header::LEVEL] = level;
-}
-
-/// Build one level's REU image with its stage music (a DLT5 asset, `crate::audio`; empty = none) and
-/// the C64 build's paged code phases (`paging::NAMES` order, `dist/phases`; empty = none).
+/// Build level 0's REU image with its stage music (a DLT5 asset, `crate::audio`; empty = none) and
+/// the C64 build's paged code phases (every level's, `paging::NAMES` order, `dist/phases`; empty = none).
 pub fn build_level(pano: &Panorama, frames: &[SpriteImage], border: u8, music: &[u8], phases: &[Vec<u8>]) -> Result<Vec<u8>, String> {
-    build_animated_level(std::slice::from_ref(pano), 0, frames, border, music, phases)
+    build_animated_level(std::slice::from_ref(pano), 0, frames, border, music, phases, 0)
 }
 
 /// [`build_level`] for an animated level: `panos` is its loop of whole panorama frames (a power of two of
-/// them, all the same size and palette), each shown `1 << shift` ticks.
-pub fn build_animated_level(panos: &[Panorama], shift: u8, frames: &[SpriteImage], border: u8, music: &[u8], phases: &[Vec<u8>]) -> Result<Vec<u8>, String> {
+/// them, all the same size and palette), each shown `1 << shift` ticks; the image holds `level`
+/// (`format::header::LEVEL`), and of the phases the common ones and that level's (`paging::level_slots`).
+pub fn build_animated_level(panos: &[Panorama], shift: u8, frames: &[SpriteImage], border: u8, music: &[u8], phases: &[Vec<u8>], level: u8) -> Result<Vec<u8>, String> {
     assert!(frames.len() <= u16::MAX as usize);
     let pano = &panos[0];
     assert!(pano.rows >= 25, "panorama needs at least 25 cell rows");
@@ -142,32 +138,42 @@ pub fn build_animated_level(panos: &[Panorama], shift: u8, frames: &[SpriteImage
     let phase_addr = if phases.is_empty() {
         0
     } else {
-        let n = crate::paging::PHASES as usize;
+        let n = crate::paging::PHASES;
         if phases.len() != n {
             return Err(format!("{} phase images, want {n}", phases.len()));
         }
         let slot = crate::paging::PHASE_SLOT as usize;
-        let mut blob = vec![0u8; n * slot];
         for (id, img) in phases.iter().enumerate() {
             if img.len() > slot {
                 return Err(format!("phase {} is {} bytes (> {slot})", crate::paging::NAMES[id], img.len()));
             }
-            blob[id * slot..id * slot + img.len()].copy_from_slice(img);
-            a.image[header::PHASE_LENS + id] = img.len().div_ceil(256) as u8;
+        }
+        // The common phases and this level's, each in its slot (`paging`).
+        let slots = crate::paging::level_slots(phases, level);
+        let mut blob = vec![0u8; slots.len() * slot];
+        for (s, img) in slots.iter().enumerate() {
+            blob[s * slot..s * slot + img.len()].copy_from_slice(img);
+            a.image[header::PHASE_LENS + s] = img.len().div_ceil(256) as u8;
         }
         let refs: Vec<&[u8]> = phases.iter().map(|v| v.as_slice()).collect();
         a.put_u16(header::PHASE_STAMP as u32, crate::paging::stamp(&refs));
-        a.place(&blob)?
+        // Page-aligned: the C64 keeps each slot's address as its middle and high bytes.
+        let len = a.image.len().next_multiple_of(256);
+        a.image.resize(len, 0);
+        let at = a.place(&blob)?;
+        assert_eq!(at % 256, 0);
+        at
     };
 
     let size = a.image.len() as u32;
-    // The attract pilot's scratch, the music ring and the phase bank sit at the top of the REU
+    // The attract pilot's scratch, the music ring, BOOT and the band sets sit at the top of the REU
     // (`ace::MIND_REU`, `audio::RING`, `paging`).
     if size > crate::ace::MIND_REU {
         return Err(format!("level image is {size} bytes: it would run into the REU scratch at {:#x}", crate::ace::MIND_REU));
     }
     a.put_u32(header::SIZE as u32, size);
     a.put_u32(header::BACKGROUND as u32, bg_addr);
+    a.image[header::LEVEL] = level;
     a.image[header::D021] = pano.palette.d021;
     a.image[header::BORDER] = border;
     a.put_u16(header::FRAMES as u32, frames.len() as u16);

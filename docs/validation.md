@@ -497,3 +497,37 @@ of `.zp`); arith.S is 248. Main RAM free, before -> after: default and `start-s2
   block's timing laps move), music 0 underruns; `compare` 0 mismatched bytes on the default, painter and
   60-flip dumps. The profile (`--profile`, `start-boss`, 60 frames) is 39.27 ms a frame on both; the helpers
   cost within ~0.01 ms a frame of libcrt's.
+- `demo::isin`/`isin_fine` without i32 (`isin(p)` = `isin_fine(4p)`, the same fraction; byte arithmetic,
+  equal to the i32 forms at every input): `__mulsi3` left the program, no 32-bit libcall remains. C64U held
+  frames equal the host at ticks 5394 (KEELBREAKER) and 10493 (GANTRY QUEEN), where these sines drive the
+  hull's roll and her flight.
+
+## Per-level phase slots (2026-11-04)
+
+All 15 phase ids were taken (the header's `PHASE_LENS` has 15 bytes, the 16th is `LEVEL`), and S3 needs ~4
+more. A phase id is now its slot (low nibble) and owner (high nibble): slots 0-7 are every level's
+(ATTRACT, BOOT, AUDIO, TUNE, ACE, MOTOR, STAGE, BANDS), slots 8-14 the level's own (S1: BOSS, MIDBOSS,
+GROUND; S2: S2, S2GND, S2AIR, ASTRO), so every level has 7 slots of its own. A level image carries the
+common phases and its own (`paging::level_slots`, 256-byte aligned); the C64 pages straight from the
+loaded image (`use_phases` fills `PHASE_AT`/`PHASE_LEN` at boot and after each level load) instead of
+copying every phase to a bank at `$FF0000` at boot (only BOOT is still stashed there, from the PRG). The
+stamp still covers every level's phases.
+
+- The one hazard: a level's phase paged while the other level's image is loaded. `Game::step` changes the
+  level mid-tick (a clear's `start_stage`, a game over's `restart`) and the ground units' step then paged
+  the new level's phase before the C64 had loaded it. Now that step is skipped on the switch tick, and the
+  host asserts the rule on every `page` (`paging::loaded`). With the skip removed, three tests fail on the
+  assert (`the_stage_clears_and_promotes`, `a_game_over_goes_back_to_the_first_level`,
+  `the_ace_outflies_the_autopilot`); with it, every host test passes with its numbers unchanged.
+- emu64 now checks every window fetch against the phase's `dist/phases` bytes (a corrupted byte in
+  `ground.bin` faults). Every phase but BOSS was paged and matched: default (ground), `start-keel`
+  (midboss, ground), `start-boss` (S2's image: s2, s2gnd, s2air, astro) and `start-s2` (S1's image booted,
+  S2's loaded through the UCI, then s2 from its slot 8 and the common phases from the new image), no fault,
+  music 0 underruns. `compare` 0 mismatched bytes on the default and painter dumps (7,680 painted pixels
+  exact). (The `start-*` builds jump the scroll or the level outside the replay, so `compare` cannot match
+  them: 5-8 K bytes differ in each; not rerun on master for comparison.)
+- Images: S1 16,620,493 -> 16,604,160 bytes, S2 10,547,200 -> 10,534,912 (each holds only its own level's
+  phases). Code: `talonhd_page` 91 bytes (table-driven), `use_phases` in `.vtext`, `level_image` from
+  `.vtext` to main RAM (`.vtext` overflowed by 75; BOOT, at 3,769-3,792 of 4,096, cannot take it in
+  `start-s2`). Main RAM free 1,012 -> 794 (timing 893 -> 567).
+- Not yet on the C64U: a real S1 -> S2 clear (the per-level load with S2's phases from its image).

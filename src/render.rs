@@ -75,7 +75,7 @@ pub struct Image {
     pub music: u32,
     /// REU address of the paged code phases, their lengths and stamp (`format::header::PHASES`).
     pub phases: u32,
-    pub phase_lens: [u8; crate::paging::PHASES as usize],
+    pub phase_lens: [u8; crate::paging::SLOTS as usize],
     pub phase_stamp: u16,
     /// The level the image holds (`format::header::LEVEL`).
     pub level: u8,
@@ -122,7 +122,7 @@ pub fn read_image<H: Hw + ?Sized>(hw: &mut H) -> Option<Image> {
         music: le24(&h, header::MUSIC),
         phases: le24(&h, header::PHASES),
         phase_lens: {
-            let mut l = [0u8; crate::paging::PHASES as usize];
+            let mut l = [0u8; crate::paging::SLOTS as usize];
             for (i, v) in l.iter_mut().enumerate() {
                 *v = h[header::PHASE_LENS + i];
             }

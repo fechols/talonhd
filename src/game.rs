@@ -92,6 +92,8 @@ impl Game {
         self.clear = Clear::new();
         self.campanile = crate::campanile::Campanile::new();
         self.astro = crate::astrolabe::Astrolabe::new();
+        // The host's paging check follows this game, not one stepped before it (a no-op on the C64).
+        crate::paging::loaded(self.clear.level);
     }
 
     /// Power-on state on the level of the image in the REU (`format::header::LEVEL`): new games start
@@ -101,12 +103,16 @@ impl Game {
     pub fn reset_at(&mut self, level: u8, top: u8) {
         self.reset();
         self.clear = Clear::at(level, top);
+        crate::paging::loaded(level);
     }
 
     /// One tick with this tick's input.
     #[inline(never)]
     pub fn step(&mut self, input: u8) {
         self.ticks = self.ticks.wrapping_add(1);
+        // The level whose image (and so whose phases, `crate::paging`) the C64 has in the REU this tick.
+        let level = self.clear.level;
+        crate::paging::loaded(level);
         // This stage's airframe flies as itself (`sim::ship`; a game over's reset makes it the TALON).
         let ship = crate::sim::ship::of_stage(self.clear.stage);
         if self.world.ship != ship {
@@ -170,8 +176,10 @@ impl Game {
         // The ground units' step is a paged phase too, paged in only while one is out or due (frozen
         // through the stage clear, which starts the next stage at its first line). Later levels run
         // their own units and waves (`crate::stage2`, which holds the vendored sim's S1 track off).
+        // Not on the tick the stage clear or a game over moves to another level: that level's phases are
+        // in its image, which the C64 loads after the step.
         let at = lines(self);
-        if !self.clear.holds() {
+        if !self.clear.holds() && self.clear.level == level {
             if self.clear.level != 0 {
                 crate::stage2::run(self, at);
             } else if self.ground.busy(at) {
@@ -298,6 +306,8 @@ pub fn palette(g: &Game, base: Palette) -> Palette {
 /// Fill `out` with this frame's sprites; returns how many.
 #[inline(never)]
 pub fn scene(g: &Game, out: &mut [Sprite; INSTANCES]) -> usize {
+    // The C64 draws a frame only with its level's image loaded (`crate::paging`).
+    crate::paging::loaded(g.clear.level);
     let w = &g.world;
     let mut n = 0;
     let (px, py) = ((w.player.x >> 8) as i16, (w.player.y >> 8) as i16);

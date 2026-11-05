@@ -64,7 +64,7 @@ MEMORY {
     ph_bands (rwx) : ORIGIN = 0x9000, LENGTH = 0x0800
     /* Load addresses of every phase but BOOT: outside the PRG (OUTPUT_FORMAT writes ram and hiload
      * only). scripts/build-target.sh extracts them to dist/phases/<name>.bin; bake puts them in the
-     * level REU image, and boot copies them to the phase bank (main.rs install_phases). */
+     * level REU images (the common ones and each level's own: src/paging.rs), paged from there. */
     phimg (r) : ORIGIN = 0x10000, LENGTH = 0x10000
 }
 
@@ -80,7 +80,6 @@ SECTIONS {
         *(.text._ZN7talonhd4boss4Boss7sprites* .text._ZN7talonhd4boss4Boss7palette* .text._ZN7talonhd4boss9placement*)
     } >hiram AT>hiload
     .phase.boot : {
-        *(.text._ZN11talonhd_c6414install_phases*)
         *(.text._ZN11talonhd_c6410boot_image*)
         *(.text._ZN7talonhd4game4Game5reset* .text._ZN7talonhd4game4Game8reset_at*)
         *(.text._ZN7talonhd6render8hud_init* .text._ZN7talonhd6render10read_image* .text._ZN7talonhd6render12verify_image* .text._ZN7talonhd6render16invalidate_image*)
@@ -125,7 +124,6 @@ SECTIONS {
     .vtext : {
         *(.vtext .vtext.*)
         *(.text._ZN7talonhd3hud4live*)
-        *(.text._ZN11talonhd_c6411level_image*)
     } >vram AT>hiload
     .phase.boss : {
         *(.text._ZN7talonhd4boss*)

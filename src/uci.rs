@@ -13,7 +13,8 @@
 //! sent once more.
 //!
 //! Level images are written at their used size and never reach `ace::MIND_REU` (`bake` refuses them), so a
-//! load leaves the Mind, the music ring and the phase bank alone; every image carries the same phases.
+//! load leaves the Mind, the music ring, BOOT and the band sets alone; every image carries the same common
+//! phases and its own level's (`paging`), paged straight from it.
 //! Shared code (`Hw`), so the host model ([`crate::model::Machine`]'s UCI) checks the protocol; on the
 //! C64 it is in the TUNE phase (`paging::TUNE`, with `load_level`).
 

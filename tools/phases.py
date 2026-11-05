@@ -2,9 +2,10 @@
 """Extract the paged code phases (src/paging.rs) from the linked C64 program and stamp the PRG.
 
 Every phase but BOOT is linked with a load address outside the PRG (target-c64/link.ld `phimg`), so the
-PRG stays small; `talonhd bake` puts dist/phases/<name>.bin into the level REU image and the C64 copies
-them to the phase bank at boot. The stamp (paging::stamp, same algorithm here) ties the two: it is
-patched into the PRG's PHASE_STAMP and written by bake into the image header; boot refuses a mismatch.
+PRG stays small; `talonhd bake` puts dist/phases/<name>.bin into the level REU images (the common ones and
+each level's own) and the C64 pages them from there. The stamp (paging::stamp over every phase, same
+algorithm here) ties the two: it is patched into the PRG's PHASE_STAMP and written by bake into every
+image header; boot refuses a mismatch.
 
     python3 tools/phases.py dist/talonhd.elf dist/talonhd.prg dist/phases   (scripts/build-target.sh)
 """
@@ -21,9 +22,22 @@ PRG_BASE = 0x0801
 
 def names():
     src = (ROOT / 'src/paging.rs').read_text(encoding='utf-8')
-    m = re.search(r'pub const NAMES: \[&str; PHASES as usize\] = \[([^\]]*)\]', src)
-    boot = int(re.search(r'pub const BOOT: u8 = (\d+);', src).group(1))
-    return re.findall(r'"(\w+)"', m.group(1)), boot
+    m = re.search(r'pub const NAMES: \[&str; PHASES\] = \[([^\]]*)\]', src)
+    found = re.findall(r'"(\w+)"', m.group(1))
+    return found, found.index('boot')
+
+
+def slots():
+    """{(owner, slot): name} from src/paging.rs: owner 0 for every level's phases, level + 1 for a
+    level's own (`paging::of_level`), as the id's high and low nibbles."""
+    src = (ROOT / 'src/paging.rs').read_text(encoding='utf-8')
+    ids = {}
+    for name, n, level, slot in re.findall(r'pub const (\w+): u8 = (?:(\d+)|of_level\((\d+), (\d+)\));', src):
+        ids[name] = int(n) if n else (int(level) + 1) << 4 | int(slot)
+    order = re.findall(r'\w+', re.search(r'pub const IDS: \[u8; PHASES\] = \[([^\]]*)\]', src).group(1))
+    found, _ = names()
+    assert len(order) == len(found), 'paging::IDS and NAMES differ in length'
+    return {(ids[i] >> 4, ids[i] & 15): n for i, n in zip(order, found)}
 
 
 def stamp(images, boot):

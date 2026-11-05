@@ -6,6 +6,7 @@
 //! talonhd compare [--reu FILE] --dump DIR [--t N]
 //! talonhd bake-model <file.mesh> [--palette v,d,l,h] [--out PNG]   orientation sheet + light share
 //! talonhd s2                                                      S2 TERRACES: panorama and loop previews
+//! talonhd s3                                                      S3 REDLINE: panorama and loop previews
 //! talonhd hand-models                                             write the hand-built models' .mesh files
 //! talonhd lineup [--palette v,d,l,h] [--out PNG]                 the roster at C64 size on the stage's void
 //! ```
@@ -52,6 +53,7 @@ fn main() -> ExitCode {
         "bake-model" => cmd_bake_model(&argv[1..]),
         "hand-models" => cmd_hand_models(),
         "s2" => cmd_s2(),
+        "s3" => cmd_s3(),
         "lineup" => cmd_lineup(&args),
         other => Err(format!("unknown command {other}")),
     };
@@ -106,19 +108,17 @@ fn sheet(frames: &[SpriteImage], pal: render::Palette) -> (usize, Vec<[u8; 3]>) 
     (w * n, out)
 }
 
-/// S2 TERRACES for review: the whole panorama (`output/sheets/panorama_s2.png`) and its animation loop
-/// through windows of interest (`output/sheets/anim_s2_*.png`), with each section's code shares.
-fn cmd_s2() -> Result<(), String> {
-    let t0 = std::time::Instant::now();
-    let panos = talonhd::s2::panorama_frames();
-    println!("S2 animation: {} frames rendered in {:.1} s", panos.len(), t0.elapsed().as_secs_f64());
+/// A level's panorama and animation loop for review: the whole panorama (`output/sheets/panorama_<tag>.png`)
+/// and its loop through windows of interest (`anim_<tag>_<window>.png`, every frame side by side, and
+/// `<tag>_<window>.png`, the first frame alone), with the code shares.
+fn level_sheets(name: &str, tag: &str, panos: &[Panorama], windows: &[(&str, usize)]) -> Result<(), String> {
     let pano = &panos[0];
     let s = talonhd::s1::code_share(pano);
-    println!("S2 panorama: void {:.0} %, dark {:.0} %, light {:.1} %, hot {:.1} %", s[0] * 100.0, s[1] * 100.0, s[2] * 100.0, s[3] * 100.0);
+    println!("{name} panorama: void {:.0} %, dark {:.0} %, light {:.1} %, hot {:.1} %", s[0] * 100.0, s[1] * 100.0, s[2] * 100.0, s[3] * 100.0);
     let strip: Vec<[u8; 3]> = pano.codes.iter().map(|&c| talonhd::palette::PALETTE[pano.palette.color_of(c) as usize]).collect();
-    png::save_wide(&Path::new("output/sheets").join("panorama_s2.png"), 160, &strip)?;
+    png::save_wide(&Path::new("output/sheets").join(format!("panorama_{tag}.png")), 160, &strip)?;
     let period = demo::PANO_PERIOD as usize;
-    for (name, line) in [("vines", 300), ("farm", 160), ("aqueduct", 1680), ("village", 2100), ("square", 2500), ("fountain", 2960), ("domes", 3700), ("great_dome", 4980)] {
+    for &(window, line) in windows {
         let top = period - line - 100;
         let (w, h) = (160usize, 200usize);
         let n = panos.len();
@@ -130,13 +130,33 @@ fn cmd_s2() -> Result<(), String> {
                 }
             }
         }
-        png::save_wide(&Path::new("output/sheets").join(format!("anim_s2_{name}.png")), w * n, &px)?;
-        // The first frame alone, screen-sized, for review.
+        png::save_wide(&Path::new("output/sheets").join(format!("anim_{tag}_{window}.png")), w * n, &px)?;
         let one: Vec<[u8; 3]> = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).map(|(x, y)| px[y * w * n + x]).collect();
-        png::save_wide(&Path::new("output/sheets").join(format!("s2_{name}.png")), w, &one)?;
+        png::save_wide(&Path::new("output/sheets").join(format!("{tag}_{window}.png")), w, &one)?;
     }
-    println!("previews: output/sheets/panorama_s2.png, s2_*.png, anim_s2_*.png");
+    println!("previews: output/sheets/panorama_{tag}.png, {tag}_*.png, anim_{tag}_*.png");
     Ok(())
+}
+
+/// S2 TERRACES for review (`level_sheets`).
+fn cmd_s2() -> Result<(), String> {
+    let t0 = std::time::Instant::now();
+    let panos = talonhd::s2::panorama_frames();
+    println!("S2 animation: {} frames rendered in {:.1} s", panos.len(), t0.elapsed().as_secs_f64());
+    let windows = [("vines", 300), ("farm", 160), ("aqueduct", 1680), ("village", 2100), ("square", 2500), ("fountain", 2960), ("domes", 3700), ("great_dome", 4980)];
+    level_sheets("S2", "s2", &panos, &windows)
+}
+
+/// S3 REDLINE for review (`level_sheets`).
+fn cmd_s3() -> Result<(), String> {
+    let t0 = std::time::Instant::now();
+    let panos = talonhd::s3::panorama_frames();
+    println!("S3 animation: {} frames rendered in {:.1} s", panos.len(), t0.elapsed().as_secs_f64());
+    let windows = [
+        ("desert", 300), ("dunes", 900), ("highway", 1260), ("mouth", 1700), ("tunnels", 2080), ("sidewinder", 2500),
+        ("gantry", 3060), ("trestle", 3290), ("fan", 3560), ("yard", 4000), ("shed", 4500), ("titan", 5000),
+    ];
+    level_sheets("S3", "s3", &panos, &windows)
 }
 
 fn cmd_bake(args: &Args) -> Result<(), String> {
@@ -225,7 +245,7 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
         println!("music: {MUSIC_S1}: {} bytes, {:.1} s, {books} codebooks", music.len(), samples as f64 / 16_000.0);
     }
     let phases = load_phases();
-    let image = bake::build_animated_level(&panos, talonhd::s1::ANIM_SHIFT, &frames, 0, &music, &phases)?;
+    let image = bake::build_animated_level(&panos, talonhd::s1::ANIM_SHIFT, &frames, 0, &music, &phases, 0)?;
     println!("level image: {} bytes of 16 MiB ({:.1} %), art ~{total} bytes", image.len(), image.len() as f64 * 100.0 / 16777216.0);
     write(&out.join("talonhd.reu"), &image)?;
     write(&out.join("talonhd.cfg"), include_bytes!("../config/talonhd.cfg"))?;
@@ -303,8 +323,8 @@ fn cmd_bake(args: &Args) -> Result<(), String> {
     Ok(())
 }
 
-/// The C64 build's paged code phases (`scripts/build-target.sh` writes them): every level image carries
-/// them.
+/// The C64 build's paged code phases (`scripts/build-target.sh` writes them), every level's: each level
+/// image carries the common ones and its own (`paging::level_slots`).
 fn load_phases() -> Vec<Vec<u8>> {
     let phases: Vec<Vec<u8>> = talonhd::paging::NAMES
         .iter()
@@ -312,7 +332,7 @@ fn load_phases() -> Vec<Vec<u8>> {
         .collect();
     if phases.iter().all(|p| !p.is_empty()) {
         let refs: Vec<&[u8]> = phases.iter().map(|v| v.as_slice()).collect();
-        println!("phases: {} B in {} slots, stamp {:04x}", phases.iter().map(|p| p.len()).sum::<usize>(), phases.len(), talonhd::paging::stamp(&refs));
+        println!("phases: {} B in {} phases, stamp {:04x}", phases.iter().map(|p| p.len()).sum::<usize>(), phases.len(), talonhd::paging::stamp(&refs));
         phases
     } else {
         println!("phases: dist/phases incomplete (build the C64 program first); the image has none");
@@ -366,8 +386,7 @@ fn cmd_bake_s2(args: &Args) -> Result<(), String> {
         println!("music: {MUSIC_S2}: {} bytes, {:.1} s, {books} codebooks", music.len(), samples as f64 / 16_000.0);
     }
     let phases = load_phases();
-    let mut image = bake::build_animated_level(&panos, talonhd::s2::ANIM_SHIFT, &frames, 0, &music, &phases)?;
-    bake::set_level(&mut image, 1);
+    let image = bake::build_animated_level(&panos, talonhd::s2::ANIM_SHIFT, &frames, 0, &music, &phases, 1)?;
     println!("S2 level image: {} bytes of 16 MiB ({:.1} %), art ~{total} bytes", image.len(), image.len() as f64 * 100.0 / 16777216.0);
     write(&out.join("talonhd_s2.reu"), &image)?;
 
@@ -728,9 +747,75 @@ fn cmd_lineup_s2() -> Result<(), String> {
     save_rows(Path::new("output/lineup/s2_bosses.png"), talonhd::s2::PALETTE, &rows)
 }
 
+/// S3 REDLINE's roster for review under S3's sun: `output/lineup/s3.png` (the CARACARA and the enemies)
+/// and `output/lineup/s3_bosses.png` (the SIDEWINDER's train and the TRESTLE TITAN assembled).
+fn cmd_lineup_s3() -> Result<(), String> {
+    use talonhd::hand_s3 as h3;
+    let sun = talonhd::s3::SUN;
+    let roster: std::collections::BTreeMap<&str, Vec<talonhd::encode::SpriteImage>> = h3::roster().into_iter().collect();
+    let pick = |name: &str, ix: &[usize]| -> (String, Vec<talonhd::encode::SpriteImage>) {
+        (name.to_string(), ix.iter().map(|&i| roster[name][i].clone()).collect())
+    };
+    let caracara = talonhd::hand::caracara().render_all_lit(&sun);
+    // The RAIL CAR with its turret seated, at a few headings (the turret tracking on its own).
+    let cars: Vec<_> = [(0usize, 0usize), (2, 20), (4, 6), (8, 28)].iter().map(|&(y, t)| layer(32, 64, &[(&roster["rail_car"][y], 16, 32), (&roster["turret"][t], 16, 32)])).collect();
+    let rows = vec![
+        ("caracara".to_string(), vec![caracara[0].clone(), caracara[2].clone(), caracara[4].clone(), caracara[6].clone(), caracara[8].clone()]),
+        pick("dust_devil", &[0, 1, 2, 3, 4, 5, 6, 7]),
+        ("rail_car".to_string(), cars),
+        pick("sandcrawler", &[0, 1, 2, 3, 4, 6, 8, 22, 26]),
+        pick("dust_ring", &[0, 1, 2, 3]),
+        pick("water_tower", &[0, 1, 2, 3, 4]),
+        pick("vulture", &[0, 2, 4, 7]),
+        pick("lancer", &[0, 2, 4, 8, 12]),
+        pick("wasp", &[1, 13, 25, 37]),
+        pick("crawler", &[0, 4, 16, 20]),
+    ];
+    save_rows(Path::new("output/lineup/s3.png"), talonhd::s3::PALETTE, &rows)?;
+    // The SIDEWINDER: the engine leading four turret cars up the rail (the third wrecked), then the engine
+    // off its rail in phase 2.
+    let (eng, car, tur) = (&roster["sidewinder"], &roster["sidewinder_car"], &roster["turret"]);
+    let mut parts = vec![(&eng[1], 24, 44)];
+    for k in 0..4 {
+        let y = 44 + 74 + k as i32 * 66;
+        let c = if k == 2 { 3 } else { k % 3 };
+        parts.push((&car[c], 24, y));
+        if k != 2 {
+            parts.push((&tur[[0, 21, 4, 27][k]], 24, y));
+        }
+    }
+    let train = layer(48, 400, &parts);
+    let mut row = vec![train];
+    row.extend([3usize, 5, 7, 9].iter().map(|&i| eng[3 + i].clone()));
+    // The TRESTLE TITAN: body, both claws on their jibs, the boiler door, at a few slews and drops.
+    let (body, cl, cr, door) = (&roster["titan"], &roster["claw_left"], &roster["claw_right"], &roster["boiler"]);
+    let (cx, cy) = (130i32, 90i32);
+    let piv = (h3::PIVOT.0 / 2.0) as i32;
+    let at = |i: usize, d: usize| i * h3::DROPS + d;
+    let titan: Vec<_> = [(0usize, 0usize, 0usize, 0usize, 0usize), (1, 4, 1, 11, 1), (2, 8, 3, 8, 2), (3, 15, 2, 0, 3)]
+        .iter()
+        .map(|&(sway, sl, dl, sr, door_k)| {
+            layer(
+                260,
+                300,
+                &[
+                    (&body[sway], cx, cy),
+                    (&door[door_k], cx + (h3::BOILER.0 / 2.0) as i32, cy - h3::BOILER.1 as i32),
+                    (&cl[at(sl, dl)], cx + piv, cy - h3::PIVOT.1 as i32),
+                    (&cr[at(sr, dl.min(2))], cx - piv, cy - h3::PIVOT.1 as i32),
+                ],
+            )
+        })
+        .collect();
+    let mut wreck = vec![layer(260, 300, &[(&body[4], cx, cy)])];
+    wreck.extend((0..h3::DROPS).map(|k| roster["claw_shadow"][k].clone()));
+    let rows = vec![("sidewinder".to_string(), row), ("trestle_titan".to_string(), titan), ("titan_wreck".to_string(), wreck)];
+    save_rows(Path::new("output/lineup/s3_bosses.png"), talonhd::s3::PALETTE, &rows)
+}
+
 /// Write every hand-built model (`src/hand.rs`) to `assets/models/<id>.mesh`.
 fn cmd_hand_models() -> Result<(), String> {
-    for (id, m) in talonhd::hand::all().into_iter().chain(talonhd::hand_s2::all()) {
+    for (id, m) in talonhd::hand::all().into_iter().chain(talonhd::hand_s2::all()).chain(talonhd::hand_s3::all()) {
         let path = PathBuf::from(format!("assets/models/{id}.mesh"));
         write(&path, mesh::to_text(&m).as_bytes())?;
         println!("{id}: {} triangles, {} vertices -> {}", m.mesh.tris.len(), m.mesh.verts.len(), path.display());
@@ -744,12 +829,17 @@ fn cmd_lineup(args: &Args) -> Result<(), String> {
     if args.opt("--stage") == Some("2") {
         return cmd_lineup_s2();
     }
+    if args.opt("--stage") == Some("3") {
+        return cmd_lineup_s3();
+    }
     let pal: Vec<u8> = args.opt("--palette").unwrap_or("6,12,1,3").split(',').map(|c| c.trim().parse::<u8>().map_err(|_| format!("bad color {c}"))).collect::<Result<_, _>>()?;
     let palette = render::Palette::new(pal[0], pal[1], pal[2], pal[3]);
     let out = args.path("--out", "output/lineup/s1.png");
     let mut paths: Vec<PathBuf> = std::fs::read_dir("assets/models").map_err(|e| e.to_string())?.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "mesh")).collect();
     paths.sort();
-    let s2_ids: Vec<String> = talonhd::hand_s2::all().into_iter().map(|(id, _)| id).collect();
+    // Models shown on a later stage's sheet under its own light: its roster and its airframe.
+    let mut staged_ids: Vec<String> = talonhd::hand_s2::all().into_iter().chain(talonhd::hand_s3::all()).map(|(id, _)| id).collect();
+    staged_ids.extend(["hd.ship.peregrine".to_string(), "hd.ship.caracara".to_string()]);
     // Rows of (name, frames); each model shows up to 4 evenly spaced orientations.
     let mut rows: Vec<Vec<talonhd::encode::SpriteImage>> = Vec::new();
     let mut names = Vec::new();
@@ -758,8 +848,8 @@ fn cmd_lineup(args: &Args) -> Result<(), String> {
         if m.canvas.0 > 128 || m.name.starts_with("boss.") {
             continue; // bosses get their own sheets
         }
-        if s2_ids.contains(&m.name) {
-            continue; // S2's roster: `lineup --stage 2`, under its own light
+        if staged_ids.contains(&m.name) {
+            continue; // S2's and S3's rosters and airframes: `lineup --stage 2|3`, under their own light
         }
         let all = m.render_all();
         let n = all.len();

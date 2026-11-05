@@ -100,15 +100,16 @@ pub mod header {
     pub const HUD: usize = 36;
     /// u32: REU address of the stage music, a DLT5 asset (`crate::audio`); 0 = none.
     pub const MUSIC: usize = 40;
-    /// u32: REU address of the paged code phases (`crate::paging`): one `PHASE_SLOT` per id, in id order
-    /// (the `BOOT` slot unused: the PRG carries that one); 0 = none.
+    /// u32: REU address (256-byte aligned) of the paged code phases (`crate::paging`): one `PHASE_SLOT` per slot, the
+    /// common phases' and the level's own (the `BOOT` slot unused: the PRG carries that one); 0 = none.
     pub const PHASES: usize = 44;
-    /// u8 × `paging::PHASES` (up to 16): each phase's length in 256-byte pages.
+    /// u8 × `paging::SLOTS` (15): each slot's phase length in 256-byte pages (0 = none).
     pub const PHASE_LENS: usize = 48;
-    /// u16: the phases' stamp (`paging::stamp`); the PRG carries the same one (patched in by the build).
+    /// u16: the phases' stamp (`paging::stamp`, every level's phases); the PRG carries the same one
+    /// (patched in by the build).
     pub const PHASE_STAMP: usize = 34;
     /// u8: the level this image holds (0 = S1 BREAKWATER, 1 = S2 TERRACES): its frames, units and
-    /// fights (`clear::Clear::level`). The last byte of `PHASE_LENS` (phases are at most 15).
+    /// fights and its own phases (`clear::Clear::level`). The 16th byte of `PHASE_LENS` (15 slots).
     pub const LEVEL: usize = 63;
 }
 

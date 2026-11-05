@@ -27,7 +27,7 @@ use crate::hw::{self, Hw};
 pub const PLAYER: u16 = 0xC800;
 /// Decoded PCM is staged here before each stash (the renderer's segment buffer).
 pub const STAGING: u16 = crate::layout::SEG_BUF;
-/// The PCM ring in the REU: below the phase bank (`$FF0000`), clear of any level image.
+/// The PCM ring in the REU: below the top bank (`paging::REU_BOOT`, the band sets), clear of any level image.
 pub const RING: u32 = 0xFE_8000;
 pub const RING_SAMPLES: u32 = 32_768;
 /// The producer stays this far behind the left voice's next lap (more than [`DELAY`]: the lagging

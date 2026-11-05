@@ -281,7 +281,7 @@ fn animated_levels_pick_a_frame_by_tick() {
         p.palette = pal;
     }
     let frames = vec![sprite(&mut rng, 32, 32)];
-    let image = bake::build_animated_level(&panos, 2, &frames, 0, &[], &[]).unwrap();
+    let image = bake::build_animated_level(&panos, 2, &frames, 0, &[], &[], 0).unwrap();
     let mut m = Machine::new(&image);
     let img = render::read_image(&mut m).expect("header");
     assert!(render::verify_image(&mut m, &img));

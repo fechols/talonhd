@@ -43,6 +43,8 @@ pub mod hand;
 #[cfg(feature = "host")]
 pub mod hand_s2;
 #[cfg(feature = "host")]
+pub mod hand_s3;
+#[cfg(feature = "host")]
 pub mod mesh;
 #[cfg(feature = "host")]
 pub mod model;
@@ -60,3 +62,5 @@ pub mod reference;
 pub mod s1;
 #[cfg(feature = "host")]
 pub mod s2;
+#[cfg(feature = "host")]
+pub mod s3;

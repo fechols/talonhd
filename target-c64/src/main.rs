@@ -215,36 +215,44 @@ unsafe extern "C" {
 
 /// The phase in the window (0xFF: none).
 static mut CURRENT_PHASE: u8 = 0xFF;
-/// Each phase's length (BOOT's from the PRG, the rest from the level image's header).
-/// Each phase's length in 256-byte pages (`format::header::PHASE_LENS`).
+/// Each slot's phase length in 256-byte pages: BOOT's from the PRG, the rest from the loaded level image's
+/// header (`format::header::PHASE_LENS`, [`use_phases`]).
 // Written before every read: no zeroed BSS needed; lives with the static frames (`.noinit`, $CB60).
 #[unsafe(link_section = ".noinit")]
-static mut PHASE_LEN: [u8; paging::PHASES as usize] = [0; paging::PHASES as usize];
+static mut PHASE_LEN: [u8; paging::SLOTS as usize] = [0; paging::SLOTS as usize];
+/// Each slot's REU address >> 8 (the image's phases are page-aligned, `format::header::PHASES`; BOOT's
+/// is `paging::REU_BOOT`): middle and high bytes, no 32-bit math.
+#[unsafe(link_section = ".noinit")]
+static mut PHASE_AT: [u16; paging::SLOTS as usize] = [0; paging::SLOTS as usize];
+/// The owner nibble of the loaded image's own phases (its level + 1, [`use_phases`]): levels share
+/// slots `paging::COMMON..`, so [`talonhd_page`] refuses any other level's phase (border 10) rather
+/// than run whatever code this image keeps in that slot.
+#[unsafe(link_section = ".noinit")]
+static mut PHASE_OWNER: u8 = 0;
 /// The stamp of the phases this PRG was built with: `scripts/build-target.sh` patches it in after the
-/// link (`tools/phases.py`); the level image's header must carry the same (`install_phases`).
+/// link (`tools/phases.py`); every level image's header must carry the same (`boot_image`, `level_image`).
 #[unsafe(no_mangle)]
 #[used]
 static PHASE_STAMP: u16 = 0xFFFF;
 
-/// Copy the level image's phases to the phase bank, through the bitmap at `$A000` (not shown yet).
-/// Runs from the BOOT phase, once the image is verified; a stamp from another build is fatal (border 8).
+/// Page from this image's phases (the common ones and its level's, `paging`): where they are and their
+/// lengths (BOOT's stays the PRG's). At boot once the image is verified, and after every level load. The
+/// window's phase stays valid: only a common one can be in it, the same code in every image.
 #[inline(never)]
-fn install_phases(c: &mut C64, img: &Image) {
-    // SAFETY: a plain read of a static the build patches; volatile so it is not folded to 0xFFFF.
-    let stamp = unsafe { core::ptr::read_volatile(&raw const PHASE_STAMP) };
-    if img.phases == 0 || img.phase_stamp != stamp {
-        fatal(c, 8);
-    }
-    for p in 0..paging::PHASES {
-        if p == paging::BOOT {
-            continue;
+#[unsafe(link_section = ".vtext.use_phases")]
+fn use_phases(img: &Image) {
+    // The middle and high bytes of the page-aligned address: no 32-bit shift.
+    let b = img.phases.to_le_bytes();
+    let mut at = u16::from_le_bytes([b[1], b[2]]);
+    unsafe {
+        PHASE_OWNER = img.level.wrapping_add(1);
+        for s in 0..paging::SLOTS as usize {
+            if s != paging::BOOT as usize {
+                PHASE_LEN[s] = img.phase_lens[s];
+                PHASE_AT[s] = at;
+            }
+            at = at.wrapping_add((paging::PHASE_SLOT >> 8) as u16);
         }
-        let n = img.phase_lens[p as usize];
-        let slot = p as u32 * paging::PHASE_SLOT;
-        let len = (n as u16) << 8;
-        talonhd::hw::fetch(c, img.phases + slot, 0xA000, len);
-        talonhd::hw::stash(c, 0xA000, paging::REU_PHASES + slot, len);
-        unsafe { PHASE_LEN[p as usize] = n };
     }
 }
 
@@ -261,8 +269,14 @@ pub extern "C" fn talonhd_page(p: u8) {
     }
     let port = c.peek(0x0001);
     c.poke(0x0001, 0x35);
-    let len = (unsafe { PHASE_LEN[p as usize] } as u16) << 8;
-    talonhd::hw::fetch(c, paging::REU_PHASES + p as u32 * paging::PHASE_SLOT, paging::WINDOW, len);
+    // Another level's phase: its slot here holds this level's code (`paging::page` asserts it on the host).
+    if p >> 4 != 0 && p >> 4 != unsafe { PHASE_OWNER } {
+        fatal(c, 10);
+    }
+    let s = paging::slot(p) as usize;
+    let (len, at) = unsafe { ((PHASE_LEN[s] as u16) << 8, PHASE_AT[s]) };
+    let [lo, hi] = at.to_le_bytes();
+    talonhd::hw::fetch(c, u32::from_le_bytes([0, lo, hi, 0]), paging::WINDOW, len);
     c.poke(0x0001, port);
 }
 
@@ -291,15 +305,16 @@ fn load_level(c: &mut C64, g: &mut Game, from: u8) {
 }
 
 /// The image [`load_level`] left in the REU: the level asked for, baked with these phases (the Ultimate's
-/// `00` says the whole file arrived), else fatal (border 9). Resident, called with BOOT paged (for
-/// `render::read_image`). (By value: an `&mut` to main's image would put it on the soft stack.)
+/// `00` says the whole file arrived), else fatal (border 9). Resident (BOOT is full), called with BOOT
+/// paged (for `render::read_image`). (By value: an `&mut` to main's image would put it on the soft stack.)
 #[inline(never)]
 fn level_image(c: &mut C64, g: &Game) -> Image {
     // SAFETY: a plain read of a static the build patches; volatile so it is not folded to 0xFFFF.
     let stamp = unsafe { core::ptr::read_volatile(&raw const PHASE_STAMP) };
     match render::read_image(c) {
-        Some(img) if img.level == g.clear.level && img.phase_stamp == stamp => {
+        Some(img) if img.level == g.clear.level && img.phases != 0 && img.phase_stamp == stamp => {
             c.poke(0xD020, img.border);
+            use_phases(&img);
             img
         }
         _ => fatal(c, 9),
@@ -493,7 +508,11 @@ fn boot_image(c: &mut C64, g: &mut Game) -> Image {
     if img.bg_rows < layout::ROWS {
         fatal(c, 7);
     }
-    install_phases(c, &img);
+    // A stamp from another build is fatal (border 8): the image's phases are not this PRG's.
+    if img.phases == 0 || img.phase_stamp != stamp {
+        fatal(c, 8);
+    }
+    use_phases(&img);
 
     // CIA 2 timer A: continuous, from $FFFF, for render timing.
     c.poke(0xDD04, 0xFF);
@@ -568,8 +587,9 @@ pub extern "C" fn main() -> i16 {
     // The BOOT phase rides in the PRG, in frame-buffer space boot overwrites soon after: stash it first.
     unsafe {
         let len = &raw const __phase_boot_size as u16;
-        talonhd::hw::stash(c, &raw const __phase_boot_load_start as u16, paging::REU_PHASES + paging::BOOT as u32 * paging::PHASE_SLOT, len);
+        talonhd::hw::stash(c, &raw const __phase_boot_load_start as u16, paging::REU_BOOT, len);
         PHASE_LEN[paging::BOOT as usize] = len.div_ceil(256) as u8;
+        PHASE_AT[paging::BOOT as usize] = (paging::REU_BOOT >> 8) as u16;
     }
     // Boot-only code (image checks, HUD setup) runs from the paging window.
     paging::page(paging::BOOT);

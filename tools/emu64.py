@@ -28,15 +28,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from native_cpu import Cpu, KernelError  # noqa: E402
 from test_blit import wsl_path  # noqa: E402
+from phases import slots  # noqa: E402
 
 
 # C64U costs in 64 MHz cycles (docs/validation.md, `c64u.py bench`): an I/O register write 1.26 us; a REU
 # fetch ~9 us + 0.25 us a byte (the setup's own register writes are counted as I/O writes too: take ~1 us).
 IO_WRITE = 77
 DMA_SETUP, DMA_BYTE = 64, 16
-PHASE_BANK = 0xFF0000  # paging: REU $FF0000 + 4 KiB x id
-PHASE_NAMES = ["boss", "attract", "midboss", "boot", "ground", "audio", "tune", "ace", "motor", "stage", "s2",
-               "s2gnd", "s2air", "astro", "bands"]  # paging::NAMES
+REU_BOOT = 0xFF0000  # paging::REU_BOOT: BOOT, from the PRG
+# paging: a level image's phase slots (header PHASES + 4 KiB x slot), read from src/paging.rs: the
+# common ones (owner 0), then each level's own (owner level + 1).
+SLOTS = slots()
+
+
+def slot_name(level, slot):
+    return SLOTS.get((level + 1, slot)) or SLOTS.get((0, slot))
 
 
 def functions(elf):
@@ -63,9 +69,9 @@ def report_profile(prof, elf, frames, calls=None):
     total = collections.Counter()
     for (phase, pc), cyc in prof.items():
         if 0x9000 <= pc < 0xA000 and phase is not None:
-            fs = secs.get('.phase.' + PHASE_NAMES[phase], [])
+            fs = secs.get('.phase.' + phase, [])
             hit = next((f[2] for f in fs if f[0] <= pc < f[1]), None)
-            key = f'[{PHASE_NAMES[phase]}] ' + (hit or f'${pc:04x}')
+            key = f'[{phase}] ' + (hit or f'${pc:04x}')
         else:
             i = bisect.bisect_right(starts, pc) - 1
             key = resident[i][2] if i >= 0 and pc < resident[i][1] else f'${pc:04x}'
@@ -77,8 +83,8 @@ def report_profile(prof, elf, frames, calls=None):
     if calls:
         def where(phase, a):
             if 0x9000 <= a < 0xA000 and phase is not None:
-                fs = secs.get('.phase.' + PHASE_NAMES[phase], [])
-                return f'[{PHASE_NAMES[phase]}] ' + next((f[2] for f in fs if f[0] <= a < f[1]), f'${a:04x}')
+                fs = secs.get('.phase.' + phase, [])
+                return f'[{phase}] ' + next((f[2] for f in fs if f[0] <= a < f[1]), f'${a:04x}')
             i = bisect.bisect_right(starts, a) - 1
             return resident[i][2] if i >= 0 and a < resident[i][1] else f'${a:04x}'
         by = collections.Counter()
@@ -220,6 +226,10 @@ class C64(Cpu):
         # (REU DMAs, I/O writes), in 64 MHz cycles, charged to the instruction that caused it.
         self.phase = None
         self.extra = 0
+        # Every phase fetch is checked against the build's own phase image (dist/phases/<name>.bin, set
+        # by main): the window must get exactly that phase's bytes (per-level slots: src/paging.rs).
+        self.phase_bins = {}
+        self.paged = collections.Counter()
 
     def phi2(self):
         return self.cycles // 64
@@ -381,8 +391,30 @@ class C64(Cpu):
         kind = cmd & 3
         self.dmas.append((self.pc, ['stash', 'fetch', 'swap', 'verify'][kind], c64, reu, n))
         self.extra += DMA_SETUP + n * DMA_BYTE
-        if kind == 1 and c64 == 0x9000 and PHASE_BANK <= reu < PHASE_BANK + 15 * 0x1000:
-            self.phase = (reu - PHASE_BANK) >> 12
+        if kind == 1 and c64 == 0x9000:
+            # The phase paged in: BOOT from its own slot, the rest from the loaded image's (its header).
+            base = self.reu[44] | self.reu[45] << 8 | self.reu[46] << 16
+            if reu == REU_BOOT:
+                self.phase = 'boot'
+            elif base and base <= reu < base + 15 * 0x1000 and (reu - base) & 0xFFF == 0:
+                self.phase = slot_name(self.reu[63], (reu - base) >> 12)
+            else:
+                self.phase = None
+            self.paged[self.phase] += 1
+            if self.phase_bins and self.alarm is None and self.phase not in self.phase_bins:
+                self.alarm = f'window fetch from REU ${reu:06x} is no phase of level {self.reu[63]}'
+        if kind == 1 and 0x9000 <= c64 < 0xA000 and self.phase in self.phase_bins and self.alarm is None:
+            # This piece of the fetch (reu_transfer: 256 bytes each) against the phase's bytes at its offset;
+            # past the phase's end (BANDS composes the bands there) anything goes.
+            want, off = self.phase_bins[self.phase], c64 - 0x9000
+            m = min(n, max(0, len(want) - off))
+            if reu + m <= len(self.reu) and self.reu[reu:reu + m] == want[off:off + m]:
+                bad = None  # the usual case, compared as slices
+            else:
+                bad = next((k for k in range(m) if self.reu[(reu + k) & 0xFFFFFF] != want[off + k]), None)
+            if bad is not None:
+                self.alarm = (f'phase {self.phase}: window ${c64 + bad:04x} from REU ${reu + bad:06x} is not its '
+                              f'image (dist/phases, fetch {sum(self.paged.values())})')
         for i in range(n):
             ca, ra = (c64 + i) & 0xFFFF, (reu + i) & 0xFFFFFF
             if kind == 0:
@@ -520,6 +552,11 @@ def main():
     cpu = C64(ram, reu)
     if args.level_dir:
         cpu.uci = Uci(args.level_dir, reu, args.device_dir)
+    phase_dir = Path(args.elf).parent / 'phases'
+    for pname in SLOTS.values():
+        f = phase_dir / f'{pname}.bin'
+        if f.exists():
+            cpu.phase_bins[pname] = f.read_bytes()
     # The PRG waits for the image after erasing its magic: install it once the erase has happened.
     # Install on the first header read, after the erase (the `bench` build has none).
     erase = next((v for k, v in syms.items() if 'read_image' in k), -1)
@@ -586,6 +623,8 @@ def main():
             break
     else:
         print(f'ran {cpu.flips} flips, {steps} instructions, {cpu.irqs} interrupts, no fault')
+        if cpu.phase_bins:
+            print('phases paged (each checked against dist/phases): ' + ', '.join(f'{k} {v}' for k, v in sorted(cpu.paged.items(), key=str)))
         pb = 0xCAE0  # layout::PAINTER
         m = cpu.mem
         print(f'border painter: on {m[pb]}, delta {m[pb + 12]}, blocks skipped {m[pb + 15] | m[pb + 16] << 8}, '

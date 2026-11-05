@@ -54,7 +54,7 @@ pub const BAND_BYTES: u16 = BAND_ROWS * ROW_STRIDE;
 /// (2 x `BAND_BYTES`), in the paging window's tail (the BANDS phase's data; `$9F80` is the end).
 pub const BANDS: u16 = 0x9800;
 /// REU: each buffer's painted lines (`render::stash_bands`), which the painter streams back while that
-/// buffer is shown: above the phase slots (`paging::REU_PHASES`, 15 x 4 KiB). Line-major, the painter's
+/// buffer is shown: in the top bank above BOOT's slot (`paging::REU_BOOT`). Line-major, the painter's
 /// order: block T's 24 lines, then block B's, 40 bytes a line.
 pub const BAND_REU: u32 = 0xFF_F000;
 pub const BAND_SET: u32 = 0x800;

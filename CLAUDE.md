@@ -43,6 +43,8 @@ cargo run --release -- bake              # dist/talonhd.reu (+ music, + dist/pha
 cargo run --release -- bake --stage 2    # dist/talonhd_s2.reu (S2 TERRACES), output/frames_s2/, self-checked
 cargo run --release -- preview --t 150   # attract-mode tick 150 through the model (--stage 2: the S2 image)
 cargo run --release -- s2                # S2 TERRACES: output/sheets/panorama_s2.png, s2_*.png, anim_s2_*.png
+cargo run --release -- s3                # S3 REDLINE: output/sheets/panorama_s3.png, s3_*.png, anim_s3_*.png
+cargo run --release -- lineup --stage 3  # S3's roster under its sun: output/lineup/s3.png, s3_bosses.png
 cargo run --release --example queen_assembly   # output/lineup/queen.png: GANTRY QUEEN body + parts at 3 banks
 cargo run --release --example frame_stats -- dist/talonhd.reu 512   # DMAs / blends / I/O writes per frame
 ```
@@ -72,7 +74,8 @@ python tools/check_phases.py             # REU paging audit: resident code enter
                                          # phase's calls/jumps land only on its own functions (phases share addresses)
 python tools/emu64.py --frames 160       # the real PRG in a 6502 + REU + $01 + raster IRQ + CIA1 timer A model
                                          # (add --painter for the canvas: the painted border is checked only then):
-                                         # finds 6502-only faults (--level-dir dist: + the UCI, the per-level load;
+                                         # finds 6502-only faults (every window fetch must be its phase's
+                                         # dist/phases bytes: the per-level slots; --level-dir dist: + the UCI, the per-level load;
                                          # --dump DIR: a `c64u.py dump` + the band set + the colours the border
                                          # painter stored, for `compare`: frame, bands and painted border vs the host)
 pwsh scripts/build-windows.ps1 -Features start-keel   # debug: the attract game starts just before the midboss
@@ -189,14 +192,24 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   product managed 71%). Bullets go through
   `World::spawn_ebullet`, scores through `add_score`. `the_fight_runs_to_the_end` plays it through.
 - **REU code paging** (`src/paging.rs`, as TALON's phases): rarely active code is a *phase* linked at the
-  window `$9000-$9FFF`, fetched by `paging::page(id)` from REU `$FF0000` + 4 KiB × id when it is not
-  current (banking I/O in if the step had it out). Only BOOT rides in the PRG; every other phase has its
+  window `$9000-$9FFF`, fetched by `paging::page(id)` straight from the loaded level image when it is
+  not current (banking I/O in if the step had it out). **Per-level slots:** an id is its slot (low
+  nibble) and its owner (high nibble: 0 = every level's, slots 0-7; level + 1 for a level's own, slots
+  8-14, shared by every level: S1's `BOSS`/`MIDBOSS`/`GROUND` and S2's `S2`/`S2GND`/`S2AIR`/`ASTRO` sit in
+  the same slots of their own images), so each level has 7 slots of its own and S3 needs no new ids. A
+  level image carries the common phases and its own (`paging::level_slots`: header `PHASES`, a
+  256-byte-aligned slot per 4 KiB, `PHASE_LENS` per slot in 256-byte pages, byte 63 the image's `LEVEL`,
+  stamp at 34 over every level's phases); the per-level load brings a level's code with its art, and
+  `use_phases` (boot, `level_image`) points the C64's slot table (`PHASE_AT`, `PHASE_LEN`) at it. A level's
+  phase must never be paged while another level's image is loaded: `Game::step` skips the ground units' step
+  on the tick the level changes (a clear's `start_stage`, a game over's `restart`), and on the host `page`
+  asserts it (`paging::loaded`, set by `Game::step` and `game::scene`). Only BOOT rides in the PRG (stashed
+  to `paging::REU_BOOT`, `$FF0000`, and paged from there); every other phase has its
   load address outside it (`link.ld` `phimg`), `tools/phases.py` (run by the build) extracts them to
-  `dist/phases/` and stamps the PRG (`PHASE_STAMP`), `bake` embeds them in the level REU image (header
-  `PHASES`, lengths in 256-byte pages (u8: up to 15 phases; byte 63 is the image's `LEVEL`), stamp at 34), and boot (`install_phases`) copies them to the phase bank; a stamp mismatch
+  `dist/phases/` and stamps the PRG (`PHASE_STAMP`); a stamp mismatch
   is fatal (border 8). So: build the C64 program, then bake, then `run` + `upload-reu`. Phases: `BOSS` (the fight's step logic; `Boss::sprites/palette` and `placement` stay resident),
   `ATTRACT` (ACE's `see`), `MIDBOSS` (the KEELBREAKER's step), `BOOT` (`boot_image`: image checks,
-  `install_phases`, `hud_init`, `Game::reset`; `read_image`), `GROUND` (the ground units' step; paged while `Ground::busy`), `AUDIO`
+  `hud_init`, `Game::reset`; `read_image`; nearly full: `start-s2` overflowed it with `level_image`), `GROUND` (the ground units' step; paged while `Ground::busy`), `AUDIO`
   (the music producer, every frame), `TUNE` (music setup, at boot and per level; also
   `boot_irq` and the per-level load's `load_level` + `uci`), `ACE` and `MOTOR` (ACE's `think` and
   `motor`; ACE also holds the `bench` feature's `asm/bench.S`, run once after `start_music`; ATTRACT, MOTOR and ACE are each paged once every attract tick), `STAGE` (the stage clear's
@@ -208,7 +221,8 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   `-Zmerge-functions=disabled -Zno-jump-tables` (`target-c64/.cargo/config.toml`): LLVM folded identical
   `aim` functions into one copy in the BOSS phase and resident code called it while another phase was in
   the window. After every C64 build run `tools/check_phases.py`; add a phase = a `ph_*` region, a
-  `.phase.*` section, its symbols in `main.rs`, its entry in `check_phases.py` `ENTRIES`. 6502 math: avoid
+  `.phase.*` section, its symbols in `main.rs`, its entry in `check_phases.py` `ENTRIES`, its id and name in
+  `paging::IDS`/`NAMES` (`tools/phases.py` `slots()` reads them for emu64 too). 6502 math: avoid
   i32 multiplies in per-frame code (turret aiming cost 3 ms each until it went 16-bit, in the step).
 - **Stage clear and promotion** (`src/clear.rs`, `Game::clear`, paged `STAGE`; user: "Let's make the next
   stage!"): when the boss falls, `hot` greys out to the stage's own `dark` (`fx.node_dark`), waves and bullets stop, the stick is
@@ -276,6 +290,26 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   A game over on a later stage sets S2's fights GONE (not stepped at their hold behind the GAME OVER;
   below their lines the new game resets them, `hot` its own).
   Tests: `stage2::tests` (ACE flies S2 through both fights and the clear as the PEREGRINE: 1 death, 13,377 ticks).
+- **S3 REDLINE** (`src/s3.rs`, host; bible `docs/story/hd/models/s3.md`, the level built, not yet in the
+  game): under `s3::SUN` (hard, low, upper left, ambient 0.08: long void shadows to the lower right),
+  palette red rock/orange/yellow/cyan. Flat ground in the sun is solid orange; the canyon floor is a
+  checker (`FLOOR`) so the solid mesa tops stand above it. The desert (transverse dunes as a height field:
+  steep lee rising to a sharp crest, long windward slope; outcrops, the highway with faded dashes, sand
+  drifts and a signpost, the single line, telegraph poles), the canyon (mesas rising at line 1640, the
+  twin track weaving along the floor, `TUNNELS` spurs with timber portals, the SIDEWINDER's straight run
+  `SIDEWINDER_X`/`SIDEWINDER_RUN`, boulders, fallen poles, the signal gantry), the TRESTLE over the dry
+  riverbed (cracked mud, stones, the bents' lattice shadow), the yard (a dozen tracks fanning out
+  (`YARD_X`), boxcars and flatcars on 0,1,3,8,10,11: 2,4,7,9 stay clear for RAIL CARs, `WATER_TOWERS`,
+  `TURNTABLE`, the engine shed, `ORE_HEAPS`, buffer stops, the middle six converging under `TITAN`'s
+  `CRANE_RAILS`). `rail_x(track, u)` is every drawn track's centre line (for the units). Loop: sand off
+  the crests, tumbleweeds over the highway, rail glints (only in the sun: `sunlit`), sand pouring off the
+  left rim, the gantry's lamps, the conveyor's ore, the Lattice pulsing and creeping. Review with `s3`.
+  Roster (`src/hand_s3.rs`, hand-built to `s3.md`'s blocks, awaiting review; `roster()` lists the frame
+  sets): DUST DEVIL, RAIL CAR + its turret (also the SIDEWINDER cars'), SANDCRAWLER (rise poses, armed),
+  procedural dust rings, the WATER TOWER's lid (pulses, wreck), VULTURE, LANCER, S1's WASP and CRAWLER
+  re-lit, the SIDEWINDER's engine and turret car, the TRESTLE TITAN's body (`BOGIE_X` on the crane
+  rails), claws on jibs (16 slews × 4 drops, the right one mirrored, pivots at `PIVOT`), boiler door,
+  claw shadows. The CARACARA is `hand::caracara`.
 - **CAMPANILE** (`src/campanile.rs`, S2 midboss; its step and render-time `sprites` live in the S2 phase, the
   sprites paged by `game::scene` only while it is shown): the tower is level geometry, the crown (8 spin
   samples, a clock-hand step every 6 ticks, every 2 winding up for a ring, reversed in phase 2) and the hub
@@ -379,7 +413,7 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   char ROM, CPU RAM: `sim::collide/gauge`), `.lowtext` `$0200-$07FF` (`render`), `.uptext` `$5C00-$5FFF`
   (`sim::common/world`, `hw`), `.iotext` `$D000-$DFFF`, the RAM under the I/O chips (`sim::collide/gauge`):
   the game step runs with `$01 = $34`, so only pure code may live there, and `asm/hud.S` banks I/O in for
-  itself; `.vtext` `$5600-$57FF` (`hud::live`, `level_image`), `.ptext` `$8600` and `.p2text` `$8B00` (the border
+  itself; `.vtext` `$5600-$57FF` (`hud::live`, `use_phases`), `.ptext` `$8600` and `.p2text` `$8B00` (the border
   painter), in the HUD space the live slots freed. `$9000-$9FFF` is the paging window. Placement is by mangled
   name in the link script (or `#[cfg_attr(target_arch = "mos", unsafe(link_section = ".hitext"))]`). Every
   region is nearly full: check `llvm-size -A dist/talonhd.elf` after changes. The sprite list lives in
@@ -393,7 +427,7 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   in `uci::LEVEL_DIR`: `TALONHD_DIR` at build time, default `/Usb0/talonhd`) before drawing anything from
   it: the Ultimate Command Interface's DOS target (`$DF1C-$DF1F`, C64U config "Command Interface"
   Enabled), `CHANGE_DIR`, `OPEN_FILE`, `LOAD_REU` at 0 capped at `ace::MIND_REU` (the Ultimate reads the file
-  straight into REU memory; images never reach the Mind, the ring or the phase bank, and carry the same
+  straight into REU memory; images never reach the Mind, the ring, BOOT or the band sets, and carry the same
   phases), `CLOSE_FILE`; `00` statuses mean the whole file arrived (no checksum: seconds at 16 MB). The
   front buffer holds the last frame (the next stage's card, or GAME OVER), the HUD runs on, the music is
   muted and restarted on the new cue (`start_music`), the sprite cache emptied (common frames differ per
@@ -404,7 +438,8 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   and names end in a NUL. `load_image`'s outcome: `LOADED`; `UNCHANGED` (cd/open failed: nothing written,
   the game stays on the loaded level, `first`/`top` = it); `DAMAGED` (`LOAD_REU` failed: part of the file
   may be in the REU, so `load_level` sets an impossible level and `level_image` stops, border 9, as for a
-  wrong level or stamp). No UCI (`uci::present`: id `$C9` at `$DF1D`): `top` is the booted level.
+  wrong level, a stamp or no phases; `talonhd_page` stops with border 10 on another level's phase:
+  `PHASE_OWNER`, set by `use_phases`). No UCI (`uci::present`: id `$C9` at `$DF1D`): `top` is the booted level.
   `status::TOP` (byte 3) holds `Clear::top` (boot, and a fallback); `compare` replays to it
   (`game::replay_level(level, top, t)`; 0 in an older dump: no load; `preview --top N`, default
   `LAST_LEVEL`). Not replayable: a fallback mid-run from a level other than the booted one. Host:
@@ -417,7 +452,8 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   always starts on the complete new image.
 - **6502 size:** never u32/i32 math in our code (user: "massive code bloat"); a u32 `%` in `lines()` cost
   over 400 bytes of resident RAM, and one i32 divide in `demo::bank` pulled libcrt's `__divsi3` +
-  `__udivsi3` (~580 bytes; now 16-bit, gone). Check `llvm-nm` for `si3` helpers after changes. Check `llvm-size -A dist/talonhd.elf` and the link map after changes.
+  `__udivsi3` (~580 bytes; now 16-bit, gone), and `demo::isin`/`isin_fine` pulled `__mulsi3` (now byte
+  arithmetic, equal at every input): no 32-bit libcall is left. Check `llvm-nm` for `si3` helpers after changes. Check `llvm-size -A dist/talonhd.elf` and the link map after changes.
   `asm/arith.S` replaces libcrt's u8/u16 divides, remainders and multiplies (one u8 and one u16 divide
   core, shift-and-add multiplies: 248 bytes of main RAM for libcrt's 967), linked with `-Wl,--wrap=__X`
   (`build.rs`: libcrt keeps every divide in one archive member, so defining `__X` is a duplicate symbol); a
@@ -429,8 +465,8 @@ then `upload-reu dist/talonhd.reu` (after run: REU preload overwrites on reset),
   soft stack, every field access indirect): return it by value.
 - **Next:** 60 fps with the painter (S1's busy stretches and fights run at 30: see `docs/validation.md`), then
   the per-level load on the C64U (`upload-levels`, the `start-s2` build, its load time; then ACE's
-  attract run through S1's clear into S2). Then S3 REDLINE (`docs/story/hd/models/s3.md`, approved): per-level
-  phase slots first (15 of 15 phase ids are used, the last by BANDS; S3 needs ~4), then `src/s3.rs`, the hand models, the CARACARA
+  attract run through S1's clear into S2). Then S3 REDLINE (`docs/story/hd/models/s3.md`, approved; the level `src/s3.rs` is built, awaiting the
+  user's review): its phases in level 2's slots 8-14 (`paging::of_level(2, ..)`, a name in `NAMES`), the hand models, the CARACARA
   (`ship::BUILT` = 3), its waves and fights; and animation loops for the other stages. Memory ideas from the
   sibling repos still open: `opt-level "z"`, zero page `$90-$FF`, boot-only code in a retired section,
   borrow-and-restore overlays (impact), an IRQ static-frame audit (sueme64).

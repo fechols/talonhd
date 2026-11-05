@@ -33,6 +33,7 @@ pub fn all() -> Vec<(String, ModelFile)> {
         ("midboss.s1.keelbreaker.turret".into(), keelbreaker_turret()),
         ("hd.ship.talon".into(), talon()),
         ("hd.ship.peregrine".into(), peregrine()),
+        ("hd.ship.caracara".into(), caracara()),
     ];
     for k in 0..HATCH_POSES {
         out.push((format!("enemy.common.hatch.open{k}"), hatch(k)));
@@ -361,6 +362,46 @@ pub fn peregrine() -> ModelFile {
     model("hd.ship.peregrine", (32, 72), &[("roll", 9.0), ("roll_max_deg", 60.0)], m)
 }
 
+/// The CARACARA (S3's airframe, QUILL's after the second promotion), hand-built to its approved silhouette
+/// (`docs/story/hd/ships/ship-caracara.md` rev 4): the first twin-boom ship. A short blunt armoured pod, a
+/// broad straight wing, two parallel tail booms with engine pods, a crossbar tailplane, and the open
+/// middle between the booms that no enemy has. Wide where the PEREGRINE is narrow: 56 px long, 88
+/// across. Yellow (`light`) armour, orange (`dark`) booms and wing panels, in S3's colors.
+pub fn caracara() -> ModelFile {
+    let mut m = Mesh::new(vec![
+        Material::lit(&[VOID, DARK, LIGHT], 1.2, 2),
+        Material::lit(&[VOID, DARK, LIGHT], 0.62, 2),
+        Material::lit(&[DARK, LIGHT, HOT], 0.8, 1),
+        Material::glow(HOT),
+    ]);
+    // The pod: a blunt armoured nose, a high back, cut off square behind the wing.
+    let (n0, n1) = ([0.0, 27.0, 3.0], [4.0, 25.0, 3.0]);
+    let (c0, c1, c2) = ([0.0, 20.0, 8.0], [0.0, 4.0, 9.0], [0.0, -12.0, 7.0]);
+    let (s0, s1, s2) = ([6.0, 20.0, 3.5], [7.0, 4.0, 4.0], [5.5, -12.0, 3.5]);
+    m.sym(&[n0, n1, s0, c0], 0);
+    m.sym(&[c0, s0, s1, c1], 0);
+    m.sym(&[c1, s1, s2, c2], 0);
+    m.poly(&[[-5.5, -12.0, 3.5], [5.5, -12.0, 3.5], [0.0, -12.0, 7.0]], 1);
+    m.sym(&[n0, [0.0, 24.0, -1.0], [6.0, 20.0, -1.0], s0, n1], 1);
+    // The canopy: a wide light-blue band across the pod's brow.
+    m.poly(&[[-3.5, 19.0, 7.9], [3.5, 19.0, 7.9], [4.5, 13.0, 8.5], [0.0, 11.0, 8.8], [-4.5, 13.0, 8.5]], 2);
+    // The broad straight wing: an armoured leading facet and an orange trailing facet, slight dihedral.
+    m.sym(&[[6.5, 9.0, 4.0], [44.0, 6.0, 3.0], [44.0, 1.0, 3.6], [7.0, 0.0, 4.8]], 0);
+    m.sym(&[[7.0, 0.0, 4.8], [44.0, 1.0, 3.6], [44.0, -4.0, 3.0], [6.0, -8.0, 4.0]], 1);
+    // The booms, each with an engine pod over the wing and a nozzle glowing at its tail.
+    for sx in [-1.0, 1.0] {
+        let x = sx * 17.0;
+        m.tube([x, 14.0, 5.0], [x, -6.0, 5.0], 4.0, 8, 0, 0);
+        m.tube([x, -6.0, 5.0], [x, -9.0, 5.0], 3.0, 8, 1, 3);
+        m.beam([x, -6.0, 4.5], [x, -27.0, 4.0], 3.0, 2.6, 1);
+        // Twin fins, canted outward.
+        m.poly(&[[x, -18.0, 5.5], [x, -27.0, 5.0], [x + sx * 3.5, -27.5, 11.0], [x + sx * 3.0, -22.0, 11.0]], 0);
+    }
+    // The crossbar tailplane joining the booms.
+    m.poly(&[[-20.0, -22.0, 4.6], [20.0, -22.0, 4.6], [20.0, -27.0, 4.4], [-20.0, -27.0, 4.4]], 0);
+    model("hd.ship.caracara", (52, 58), &[("roll", 9.0), ("roll_max_deg", 60.0)], m)
+}
+
 fn model(name: &str, canvas: (u16, u16), orient: &[(&str, f64)], mesh: Mesh) -> ModelFile {
     ModelFile {
         name: name.to_string(),
@@ -595,11 +636,12 @@ fn part(mut m: Mesh, center: V3) -> Mesh {
 mod tests {
     use super::*;
 
-    /// No hand model may touch its canvas edge at any orientation (that would be clipping).
+    /// No hand model (every stage's) may touch its canvas edge at any orientation (that would be clipping).
     #[test]
     fn every_model_fits_at_every_orientation() {
         let mut bad = Vec::new();
-        for (id, m) in all() {
+        // S2's and S3's too: `hand-models` writes their `.mesh` files at these canvases and orientations.
+        for (id, m) in all().into_iter().chain(crate::hand_s2::all()).chain(crate::hand_s3::all()) {
             for (i, img) in m.render_all().iter().enumerate() {
                 let (w, h) = (img.w, img.h);
                 let edge = (0..w).any(|x| img.get(x, 0).is_some() || img.get(x, h - 1).is_some())
